@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#04070f">
+<title>Cluff Learning Systems</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23050912'/><path d='M16 5 L26 27 L16 22 L6 27 Z' fill='%234fd1e0'/></svg>">
+<style>
+/* ══════════════════════════════════════════════════════════════
+   CLUFF LEARNING SYSTEMS — bridge interface
+   Self-contained: no external fonts, scripts, or stylesheets.
+══════════════════════════════════════════════════════════════ */
+
+:root{
+  --void:#04070f;
+  --deep:#070c18;
+  --panel:rgba(9,16,31,.74);
+  --panel-solid:#0a1120;
+  --raise:rgba(19,32,56,.6);
+
+  --line:rgba(79,209,224,.16);
+  --line-mid:rgba(79,209,224,.30);
+  --line-hot:rgba(79,209,224,.55);
+
+  --text:#dce8f6;
+  --text-bright:#f2f8ff;
+  --dim:#7b95b4;
+  --faint:#4e6485;
+
+  --cyan:#4fd1e0;
+  --amber:#f5a524;
+  --violet:#a78bfa;
+  --green:#34d399;
+  --rose:#fb7185;
+
+  --font-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono',Consolas,'Liberation Mono',monospace;
+
+  --r:4px;
+  --ease:cubic-bezier(.22,.9,.28,1);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+
+html,body{height:100%}
+body{
+  margin:0;
+  min-height:100%;
+  background:var(--void);
+  color:var(--text);
+  font-family:var(--font-ui);
+  font-size:16px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+/* ── Ambient background ──────────────────────────────────────── */
+#starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+.ambient{
+  position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:
+    radial-gradient(900px 620px at 12% -8%, rgba(79,209,224,.14), transparent 62%),
+    radial-gradient(760px 540px at 92% 4%,  rgba(167,139,250,.11), transparent 60%),
+    radial-gradient(1100px 700px at 50% 118%, rgba(245,165,36,.07), transparent 65%);
+}
+.gridlines{
+  position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.5;
+  background-image:
+    linear-gradient(to right, rgba(79,209,224,.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(79,209,224,.05) 1px, transparent 1px);
+  background-size:72px 72px;
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 40%, #000 30%, transparent 100%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 40%, #000 30%, transparent 100%);
+}
+.vignette{
+  position:fixed;inset:0;z-index:1;pointer-events:none;
+  box-shadow:inset 0 0 220px 40px rgba(0,0,0,.85);
+}
+
+/* ── Shared primitives ───────────────────────────────────────── */
+.panel{
+  position:relative;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+}
+/* corner brackets */
+.panel::before,.panel::after{
+  content:'';position:absolute;width:16px;height:16px;pointer-events:none;
+  border-color:var(--line-hot);border-style:solid;border-width:0;
+}
+.panel::before{top:-1px;left:-1px;border-top-width:1px;border-left-width:1px}
+.panel::after{bottom:-1px;right:-1px;border-bottom-width:1px;border-right-width:1px}
+
+.label{
+  font-family:var(--font-mono);
+  font-size:.62rem;
+  letter-spacing:.26em;
+  text-transform:uppercase;
+  color:var(--faint);
+}
+
+.rule{height:1px;background:linear-gradient(90deg,var(--line-mid),transparent);border:0;margin:0}
+
+/* status dot */
+.led{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--cyan);box-shadow:0 0 8px var(--cyan);
+  animation:pulse 2.4s var(--ease) infinite;
+}
+.led.amber{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.led.dim{background:var(--faint);box-shadow:none;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.32}}
+
+/* buttons */
+.btn{
+  appearance:none;cursor:pointer;
+  font-family:var(--font-mono);
+  font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;
+  padding:.72rem 1.35rem;
+  border-radius:var(--r);
+  border:1px solid var(--line-mid);
+  background:linear-gradient(180deg,rgba(79,209,224,.14),rgba(79,209,224,.05));
+  color:var(--cyan);
+  transition:all .18s var(--ease);
+  position:relative;
+}
+.btn:hover:not(:disabled){
+  border-color:var(--line-hot);
+  background:linear-gradient(180deg,rgba(79,209,224,.24),rgba(79,209,224,.09));
+  color:var(--text-bright);
+  box-shadow:0 0 20px -6px rgba(79,209,224,.55);
+}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--dim)}
+.btn.ghost:hover{border-color:var(--line-mid);color:var(--text);box-shadow:none;background:rgba(79,209,224,.05)}
+.btn.sm{padding:.44rem .85rem;font-size:.63rem;letter-spacing:.15em}
+.btn.block{width:100%;display:block}
+.btn.danger{color:var(--rose);border-color:rgba(251,113,133,.3);background:rgba(251,113,133,.07)}
+.btn.danger:hover{border-color:rgba(251,113,133,.6);color:#ffd7dd;box-shadow:0 0 20px -6px rgba(251,113,133,.5)}
+
+/* inputs */
+.field{display:block;margin-bottom:1.15rem}
+.field > .label{display:block;margin-bottom:.5rem}
+.input{
+  width:100%;
+  font-family:var(--font-ui);font-size:.95rem;
+  padding:.8rem .95rem;
+  color:var(--text-bright);
+  background:rgba(4,8,16,.7);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  transition:border-color .18s var(--ease),box-shadow .18s var(--ease);
+}
+.input::placeholder{color:var(--faint)}
+.input:focus{
+  outline:none;border-color:var(--line-hot);
+  box-shadow:0 0 0 3px rgba(79,209,224,.10),0 0 22px -8px rgba(79,209,224,.7);
+}
+
+.err{
+  font-size:.82rem;color:#ffc2cb;
+  background:rgba(251,113,133,.09);
+  border:1px solid rgba(251,113,133,.28);
+  border-left-width:2px;
+  border-radius:var(--r);
+  padding:.6rem .8rem;margin-bottom:1rem;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ACCESS TERMINAL (login)
+══════════════════════════════════════════════════════════════ */
+.auth-screen{
+  position:relative;z-index:2;
+  min-height:100dvh;
+  display:flex;align-items:center;justify-content:center;
+  padding:2rem 1.25rem;
+}
+.auth-panel{width:100%;max-width:432px;padding:2.4rem 2.1rem 1.6rem}
+.auth-panel::after{border-color:var(--line-hot)}
+
+.mark{display:flex;align-items:center;gap:.85rem;margin-bottom:1.9rem}
+.mark svg{width:38px;height:38px;flex:none;filter:drop-shadow(0 0 10px rgba(79,209,224,.45))}
+.mark-text{min-width:0}
+.mark-name{
+  font-size:1.02rem;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--text-bright);line-height:1.2;
+}
+.mark-sub{font-family:var(--font-mono);font-size:.6rem;letter-spacing:.3em;color:var(--cyan);text-transform:uppercase;margin-top:.28rem}
+
+.auth-head{margin-bottom:1.6rem}
+.auth-head h1{font-size:1.3rem;font-weight:600;letter-spacing:.01em;margin:.55rem 0 .35rem;color:var(--text-bright)}
+.auth-head p{margin:0;font-size:.87rem;color:var(--dim)}
+.auth-head p b{color:var(--cyan);font-weight:500}
+
+/* segmented code entry */
+.code-row{display:flex;gap:.5rem;margin-bottom:1.15rem}
+.code-cell{
+  flex:1;min-width:0;
+  height:56px;
+  text-align:center;
+  font-family:var(--font-mono);font-size:1.4rem;font-weight:500;
+  color:var(--cyan);
+  background:rgba(4,8,16,.75);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  transition:all .16s var(--ease);
+}
+.code-cell:focus{
+  outline:none;border-color:var(--line-hot);
+  box-shadow:0 0 0 3px rgba(79,209,224,.10),0 0 26px -8px rgba(79,209,224,.8);
+  background:rgba(79,209,224,.06);
+}
+.code-cell.filled{border-color:var(--line-mid)}
+
+.auth-foot{
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  margin-top:1.7rem;padding-top:1rem;border-top:1px solid var(--line);
+}
+.diag{display:flex;gap:.9rem;flex-wrap:wrap}
+.diag span{display:flex;align-items:center;gap:.4rem;font-family:var(--font-mono);font-size:.56rem;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+
+/* ══════════════════════════════════════════════════════════════
+   BRIDGE (app)
+══════════════════════════════════════════════════════════════ */
+#app{position:relative;z-index:2;min-height:100dvh;display:flex;flex-direction:column}
+
+.topbar{
+  position:sticky;top:0;z-index:20;
+  display:flex;align-items:center;gap:1.25rem;
+  padding:.85rem clamp(1rem,4vw,2.5rem);
+  background:rgba(5,9,18,.82);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--line);
+}
+.topbar .mark{margin:0;gap:.7rem}
+.topbar .mark svg{width:30px;height:30px}
+.topbar .mark-name{font-size:.84rem}
+.topbar .mark-sub{font-size:.53rem;letter-spacing:.26em}
+.topbar-spacer{flex:1}
+
+.usercard{display:flex;align-items:center;gap:.7rem}
+.avatar{
+  width:34px;height:34px;flex:none;
+  display:grid;place-items:center;
+  font-size:1rem;
+  color:var(--cyan);
+  background:rgba(79,209,224,.10);
+  border:1px solid var(--line-mid);
+  border-radius:var(--r);
+}
+.usermeta{line-height:1.25;min-width:0}
+.usermeta .nm{font-size:.82rem;color:var(--text-bright);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.usermeta .rk{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;color:var(--cyan)}
+
+main{flex:1;width:100%;max-width:1240px;margin:0 auto;padding:clamp(1.75rem,5vw,3.25rem) clamp(1rem,4vw,2.5rem) 3rem}
+
+/* hero */
+.hero{margin-bottom:2.75rem}
+.hero .label{display:flex;align-items:center;gap:.55rem}
+.hero h1{
+  font-size:clamp(1.8rem,4.6vw,2.75rem);
+  font-weight:600;letter-spacing:-.015em;line-height:1.12;
+  margin:.7rem 0 .55rem;color:var(--text-bright);
+}
+.hero h1 .accent{
+  background:linear-gradient(96deg,var(--cyan),var(--violet));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.hero p{margin:0;max-width:56ch;color:var(--dim);font-size:.98rem}
+
+.sweep{position:relative;height:1px;margin:1.9rem 0 0;background:var(--line);overflow:hidden}
+.sweep::after{
+  content:'';position:absolute;inset:0;width:34%;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  animation:sweep 5.5s var(--ease) infinite;
+}
+@keyframes sweep{0%{transform:translateX(-110%)}100%{transform:translateX(400%)}}
+
+/* section headers */
+.sec-head{display:flex;align-items:baseline;gap:1rem;margin:0 0 1.15rem}
+.sec-head h2{font-size:.95rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--text-bright);margin:0}
+.sec-head .rule{flex:1;align-self:center}
+.sec-head .count{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.2em;color:var(--faint)}
+
+section + section{margin-top:3rem}
+
+/* tool grid */
+.tool-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(272px,1fr));
+  gap:1.1rem;
+}
+.tool{
+  --tone:var(--cyan);
+  position:relative;
+  display:flex;flex-direction:column;
+  padding:1.4rem 1.35rem 1.25rem;
+  min-height:216px;
+  text-align:left;
+  background:linear-gradient(165deg,rgba(15,25,45,.72),rgba(7,12,24,.72));
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  transition:transform .22s var(--ease),border-color .22s var(--ease),box-shadow .22s var(--ease);
+}
+.tool[data-accent=amber]{--tone:var(--amber)}
+.tool[data-accent=violet]{--tone:var(--violet)}
+.tool[data-accent=green]{--tone:var(--green)}
+.tool[data-accent=rose]{--tone:var(--rose)}
+
+.tool::before{
+  content:'';position:absolute;left:-1px;top:14px;bottom:14px;width:2px;
+  background:var(--tone);opacity:.5;
+  transition:opacity .22s var(--ease),box-shadow .22s var(--ease);
+}
+.tool.live{cursor:pointer}
+.tool.live:hover{
+  transform:translateY(-3px);
+  border-color:color-mix(in oklab,var(--tone) 45%,transparent);
+  box-shadow:0 14px 40px -22px rgba(0,0,0,.95),0 0 34px -20px var(--tone);
+}
+.tool.live:hover::before{opacity:1;box-shadow:0 0 14px var(--tone)}
+.tool.locked{opacity:.52}
+
+.tool-top{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1.1rem}
+.tool-glyph{
+  width:44px;height:44px;flex:none;
+  display:grid;place-items:center;
+  font-size:1.3rem;color:var(--tone);
+  background:color-mix(in oklab,var(--tone) 12%,transparent);
+  border:1px solid color-mix(in oklab,var(--tone) 30%,transparent);
+  border-radius:var(--r);
+}
+.chip{
+  font-family:var(--font-mono);font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;
+  padding:.28rem .55rem;border-radius:2px;white-space:nowrap;
+  border:1px solid currentColor;
+}
+.chip.online{color:var(--green)}
+.chip.beta{color:var(--cyan)}
+.chip.planned{color:var(--amber)}
+.chip.offline,.chip.locked{color:var(--faint)}
+
+.tool h3{margin:0 0 .4rem;font-size:1.06rem;font-weight:600;color:var(--text-bright);letter-spacing:-.01em}
+.tool .tagline{margin:0 0 .7rem;font-family:var(--font-mono);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--tone);opacity:.85}
+.tool .desc{margin:0;font-size:.86rem;color:var(--dim);line-height:1.5}
+.tool .go{
+  margin-top:auto;padding-top:1rem;
+  font-family:var(--font-mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--tone);display:flex;align-items:center;gap:.45rem;
+}
+.tool.locked .go,.tool:not(.live) .go{color:var(--faint)}
+.tool.live:hover .go .arrow{transform:translateX(4px)}
+.go .arrow{transition:transform .22s var(--ease)}
+
+/* crew roster */
+.crew-list{display:flex;flex-direction:column;gap:.55rem}
+.crew-row{
+  display:flex;align-items:center;gap:.95rem;
+  padding:.85rem 1.1rem;
+  background:rgba(11,19,35,.6);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  transition:border-color .18s var(--ease);
+}
+.crew-row:hover{border-color:var(--line-mid)}
+.crew-row .avatar{width:38px;height:38px}
+.crew-info{flex:1;min-width:0}
+.crew-info .nm{font-size:.92rem;color:var(--text-bright);font-weight:500}
+.crew-info .em{font-family:var(--font-mono);font-size:.68rem;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crew-role{
+  font-family:var(--font-mono);font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;
+  padding:.26rem .55rem;border:1px solid var(--line-mid);border-radius:2px;color:var(--cyan);
+}
+.crew-role.learner{color:var(--amber);border-color:rgba(245,165,36,.32)}
+.crew-seen{font-family:var(--font-mono);font-size:.6rem;color:var(--faint);white-space:nowrap}
+
+.empty{
+  padding:2.5rem 1.5rem;text-align:center;
+  border:1px dashed var(--line-mid);border-radius:var(--r);
+  color:var(--dim);font-size:.88rem;
+}
+
+/* status bar */
+.statusbar{
+  display:flex;align-items:center;gap:1.6rem;flex-wrap:wrap;
+  padding:.75rem clamp(1rem,4vw,2.5rem);
+  border-top:1px solid var(--line);
+  background:rgba(5,9,18,.72);
+}
+.statusbar span{display:flex;align-items:center;gap:.45rem;font-family:var(--font-mono);font-size:.56rem;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+
+/* ── Modals ─────────────────────────────────────────────────── */
+.modal{
+  position:fixed;inset:0;z-index:60;
+  display:none;align-items:center;justify-content:center;
+  padding:1.5rem;
+  background:rgba(2,4,9,.82);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+}
+.modal.show{display:flex}
+.modal .panel{width:100%;max-width:460px;padding:2rem 1.9rem 1.7rem;max-height:88dvh;overflow-y:auto}
+.modal h2{margin:.5rem 0 .4rem;font-size:1.15rem;font-weight:600;color:var(--text-bright)}
+.modal .sub{margin:0 0 1.6rem;font-size:.87rem;color:var(--dim)}
+.modal-actions{display:flex;gap:.65rem;margin-top:1.5rem}
+.modal-actions .btn{flex:1}
+
+.seg{display:flex;gap:.5rem}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{
+  flex:1;text-align:center;cursor:pointer;
+  font-family:var(--font-mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  padding:.65rem .5rem;border:1px solid var(--line);border-radius:var(--r);color:var(--dim);
+  transition:all .16s var(--ease);
+}
+.seg input:checked + label{border-color:var(--line-hot);background:rgba(79,209,224,.12);color:var(--cyan)}
+
+/* toast */
+#toast{
+  position:fixed;left:50%;bottom:2rem;transform:translate(-50%,120%);
+  z-index:90;max-width:min(90vw,420px);
+  padding:.8rem 1.15rem;
+  font-size:.86rem;
+  background:var(--panel-solid);
+  border:1px solid var(--line-mid);border-left:2px solid var(--cyan);
+  border-radius:var(--r);
+  box-shadow:0 18px 50px -18px rgba(0,0,0,.95);
+  transition:transform .3s var(--ease);
+}
+#toast.show{transform:translate(-50%,0)}
+#toast.bad{border-left-color:var(--rose)}
+
+@media (max-width:560px){
+  .topbar{gap:.75rem;padding:.7rem 1rem}
+  .topbar .mark-text{display:none}
+  .usermeta .nm{max-width:12ch}
+  .auth-panel{padding:1.9rem 1.4rem 1.3rem}
+  .code-cell{height:50px;font-size:1.2rem}
+  .crew-seen{display:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+</style>
+</head>
+<body>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+<div class="ambient" aria-hidden="true"></div>
+<div class="gridlines" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<!-- ══════════════════════════════════════════════════════════
+     ACCESS TERMINAL
+══════════════════════════════════════════════════════════ -->
+<div id="authScreen" class="auth-screen" hidden>
+  <div class="panel auth-panel">
+
+    <div class="mark">
+      <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M24 3 L44 43 L24 34 L4 43 Z" fill="url(#g1)"/>
+        <path d="M24 12 L36 38 L24 32 L12 38 Z" fill="#04070f"/>
+        <circle cx="24" cy="27" r="3.2" fill="#4fd1e0"/>
+        <defs><linearGradient id="g1" x1="4" y1="3" x2="44" y2="43">
+          <stop stop-color="#4fd1e0"/><stop offset="1" stop-color="#a78bfa"/>
+        </linearGradient></defs>
+      </svg>
+      <div class="mark-text">
+        <div class="mark-name">Cluff Learning</div>
+        <div class="mark-sub">Systems</div>
+      </div>
+    </div>
+
+    <!-- step 1: identify -->
+    <div id="step1">
+      <div class="auth-head">
+        <div class="label">Access terminal</div>
+        <h1>Identify yourself</h1>
+        <p>Enter your registered address. We'll transmit a one-time access code.</p>
+      </div>
+      <div id="err1" class="err" hidden></div>
+      <label class="field">
+        <span class="label">Email address</span>
+        <input id="loginEmail" class="input" type="email" autocomplete="email"
+               inputmode="email" placeholder="you@example.com" spellcheck="false">
+      </label>
+      <button id="sendBtn" class="btn block">Request access code</button>
+    </div>
+
+    <!-- step 2: verify -->
+    <div id="step2" hidden>
+      <div class="auth-head">
+        <div class="label">Verification</div>
+        <h1>Enter access code</h1>
+        <p>A 6-digit code was sent to <b id="emailEcho"></b>. It expires in 10 minutes.</p>
+      </div>
+      <div id="err2" class="err" hidden></div>
+      <div class="code-row" id="codeRow">
+        <input class="code-cell" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+        <input class="code-cell" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+        <input class="code-cell" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+        <input class="code-cell" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+        <input class="code-cell" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+        <input class="code-cell" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+      </div>
+      <button id="verifyBtn" class="btn block">Authenticate</button>
+      <button id="backBtn" class="btn ghost block" style="margin-top:.6rem">Use a different address</button>
+    </div>
+
+    <div class="auth-foot">
+      <div class="diag">
+        <span><i class="led"></i> Link</span>
+        <span><i class="led amber"></i> Encrypted</span>
+        <span><i class="led dim"></i> Session</span>
+      </div>
+      <div class="label" style="font-size:.55rem">v0.1</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     BRIDGE
+══════════════════════════════════════════════════════════ -->
+<div id="app" hidden>
+
+  <header class="topbar">
+    <div class="mark">
+      <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M24 3 L44 43 L24 34 L4 43 Z" fill="url(#g2)"/>
+        <path d="M24 12 L36 38 L24 32 L12 38 Z" fill="#04070f"/>
+        <circle cx="24" cy="27" r="3.2" fill="#4fd1e0"/>
+        <defs><linearGradient id="g2" x1="4" y1="3" x2="44" y2="43">
+          <stop stop-color="#4fd1e0"/><stop offset="1" stop-color="#a78bfa"/>
+        </linearGradient></defs>
+      </svg>
+      <div class="mark-text">
+        <div class="mark-name">Cluff Learning</div>
+        <div class="mark-sub">Systems</div>
+      </div>
+    </div>
+
+    <div class="topbar-spacer"></div>
+
+    <div class="usercard">
+      <div class="avatar" id="userAvatar">◈</div>
+      <div class="usermeta">
+        <div class="nm" id="userName">—</div>
+        <div class="rk" id="userRank">—</div>
+      </div>
+    </div>
+    <button id="logoutBtn" class="btn ghost sm">Sign out</button>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="label"><i class="led"></i> <span id="stardate">—</span></div>
+      <h1>Welcome aboard, <span class="accent" id="heroName">Cadet</span></h1>
+      <p id="heroSub">All systems nominal. Select a module below to begin your session.</p>
+      <div class="sweep"></div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <h2>Modules</h2>
+        <div class="rule"></div>
+        <div class="count" id="toolCount">—</div>
+      </div>
+      <div class="tool-grid" id="toolGrid"></div>
+    </section>
+
+    <section id="crewSection" hidden>
+      <div class="sec-head">
+        <h2>Crew Roster</h2>
+        <div class="rule"></div>
+        <button id="addMemberBtn" class="btn ghost sm">+ Add member</button>
+      </div>
+      <div class="crew-list" id="crewList"></div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span><i class="led"></i> Uplink stable</span>
+    <span><i class="led amber"></i> <span id="familyStatus">Unassigned</span></span>
+    <span><i class="led dim"></i> Cluff Learning Systems</span>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     MODALS
+══════════════════════════════════════════════════════════ -->
+<div id="familyModal" class="modal">
+  <div class="panel">
+    <div class="label">Registry</div>
+    <h2>Establish your family</h2>
+    <p class="sub">You're not assigned to a family yet. Create one and you'll be its parent — then you can add each learner by email.</p>
+    <div id="errFamily" class="err" hidden></div>
+    <label class="field">
+      <span class="label">Family name</span>
+      <input id="familyName" class="input" type="text" placeholder="Cluff Family" maxlength="80">
+    </label>
+    <div class="modal-actions">
+      <button id="createFamilyBtn" class="btn">Create family</button>
+    </div>
+  </div>
+</div>
+
+<div id="memberModal" class="modal">
+  <div class="panel">
+    <div class="label">Registry</div>
+    <h2>Add crew member</h2>
+    <p class="sub">They'll be able to sign in with this address once you add them. Nobody can register on their own.</p>
+    <div id="errMember" class="err" hidden></div>
+    <label class="field">
+      <span class="label">Name</span>
+      <input id="memberName" class="input" type="text" placeholder="Evan" maxlength="60">
+    </label>
+    <label class="field">
+      <span class="label">Email address</span>
+      <input id="memberEmail" class="input" type="email" placeholder="evan@example.com" spellcheck="false">
+    </label>
+    <div class="field">
+      <span class="label">Role</span>
+      <div class="seg">
+        <input type="radio" name="mrole" id="roleLearner" value="learner" checked>
+        <label for="roleLearner">Learner</label>
+        <input type="radio" name="mrole" id="roleParent" value="parent">
+        <label for="roleParent">Parent</label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="cancelMemberBtn" class="btn ghost">Cancel</button>
+      <button id="saveMemberBtn" class="btn">Add</button>
+    </div>
+  </div>
+</div>
+
+<div id="nameModal" class="modal">
+  <div class="panel">
+    <div class="label">Identity</div>
+    <h2>What should we call you?</h2>
+    <p class="sub">This is the name shown on the bridge and to the rest of your crew.</p>
+    <label class="field">
+      <span class="label">Display name</span>
+      <input id="displayNameInput" class="input" type="text" placeholder="Evan" maxlength="60">
+    </label>
+    <div class="modal-actions">
+      <button id="saveNameBtn" class="btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   CONFIG
+══════════════════════════════════════════════════════════════ */
+const API_URL   = 'https://cluff-learning-api.kylecluff.workers.dev';
+const TOKEN_KEY = 'cls_jwt';
+
+let AUTH = { token: null, user: null };
+
+const $  = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+/* ══════════════════════════════════════════════════════════════
+   API
+══════════════════════════════════════════════════════════════ */
+async function api(method, path, body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (AUTH.token) opts.headers['Authorization'] = `Bearer ${AUTH.token}`;
+  if (body !== null) opts.body = JSON.stringify(body);
+  try {
+    const res  = await fetch(API_URL + path, opts);
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; }
+    catch { data = { error: text || `HTTP ${res.status}` }; }
+    if (!res.ok) return { error: data.error || `HTTP ${res.status}`, status: res.status };
+    return data;
+  } catch (e) {
+    return { error: 'Unable to reach the server. Check your connection.' };
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   UI helpers
+══════════════════════════════════════════════════════════════ */
+let toastTimer;
+function toast(msg, bad = false) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.toggle('bad', bad);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3600);
+}
+
+function showErr(id, msg) {
+  const el = $(id);
+  if (!msg) { el.hidden = true; return; }
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+function openModal(id)  { $(id).classList.add('show'); }
+function closeModal(id) { $(id).classList.remove('show'); }
+
+function stardate() {
+  const d = new Date();
+  const start = new Date(d.getFullYear(), 0, 0);
+  const day = Math.floor((d - start) / 86400000);
+  const frac = Math.floor(((d.getHours() * 60 + d.getMinutes()) / 1440) * 100);
+  return `Stardate ${d.getFullYear()}.${String(day).padStart(3,'0')}.${String(frac).padStart(2,'0')}`;
+}
+
+function firstName(user) {
+  if (user?.display_name) return user.display_name.trim().split(/\s+/)[0];
+  return (user?.email || '').split('@')[0];
+}
+
+function rankFor(user) {
+  if (!user?.family) return 'Unassigned';
+  return user.role === 'parent' ? 'Commander' : 'Cadet';
+}
+
+function relTime(iso) {
+  if (!iso) return 'never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diff / 60000);
+  if (mins < 1)  return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24)  return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Starfield
+══════════════════════════════════════════════════════════════ */
+(function starfield() {
+  const canvas = $('starfield');
+  const ctx = canvas.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let stars = [], w = 0, h = 0, dpr = 1;
+
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    w = innerWidth;
+    h = innerHeight;
+    if (!w || !h) { stars = []; return; }   // pane not laid out yet
+    canvas.width  = w * dpr;
+    canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const count = Math.round((w * h) / 11000);
+    stars = Array.from({ length: count }, () => ({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      r: Math.random() * 1.15 + .25,
+      a: Math.random() * .55 + .15,
+      v: Math.random() * .022 + .004,
+      p: Math.random() * Math.PI * 2,
+    }));
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, w, h);
+    for (const s of stars) {
+      const twinkle = reduce ? 1 : .68 + .32 * Math.sin(t / 900 + s.p);
+      ctx.globalAlpha = s.a * twinkle;
+      ctx.fillStyle = s.r > 1.05 ? '#9fdcff' : '#dce8f6';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+      if (!reduce) {
+        s.y -= s.v;
+        if (s.y < -2) { s.y = h + 2; s.x = Math.random() * w; }
+      }
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(draw);
+  }
+
+  addEventListener('resize', resize, { passive: true });
+  resize();
+  requestAnimationFrame(draw);
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   Boot
+══════════════════════════════════════════════════════════════ */
+async function boot() {
+  AUTH.token = localStorage.getItem(TOKEN_KEY);
+  if (!AUTH.token) { showAuth(); return; }
+
+  const me = await api('GET', '/auth/me');
+  if (me.error || !me.user) {
+    localStorage.removeItem(TOKEN_KEY);
+    AUTH.token = null;
+    showAuth();
+    return;
+  }
+  AUTH.user = me.user;
+  await showApp();
+}
+
+function showAuth() {
+  $('app').hidden = true;
+  $('authScreen').hidden = false;
+  $('loginEmail').focus();
+}
+
+async function showApp() {
+  $('authScreen').hidden = true;
+  $('app').hidden = false;
+  renderIdentity();
+
+  // Onboarding runs one modal at a time: name first, then family.
+  if (!AUTH.user.display_name) {
+    $('displayNameInput').value = firstName(AUTH.user);
+    openModal('nameModal');
+    $('displayNameInput').focus();
+  } else {
+    promptFamilyIfNeeded();
+  }
+
+  await Promise.all([loadTools(), loadCrew()]);
+}
+
+function promptFamilyIfNeeded() {
+  if (AUTH.user.family) return;
+  openModal('familyModal');
+  $('familyName').focus();
+}
+
+function renderIdentity() {
+  const u = AUTH.user;
+  $('userName').textContent  = u.display_name || u.email;
+  $('userRank').textContent  = rankFor(u);
+  $('userAvatar').textContent = (u.display_name || u.email || '?').trim()[0].toUpperCase();
+  $('heroName').textContent  = firstName(u) || 'Cadet';
+  $('stardate').textContent  = stardate();
+  $('familyStatus').textContent = u.family ? u.family.name : 'Unassigned';
+  $('heroSub').textContent = u.family
+    ? 'All systems nominal. Select a module below to begin your session.'
+    : 'Standing by — you need to be assigned to a family before modules unlock.';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Login flow
+══════════════════════════════════════════════════════════════ */
+$('sendBtn').addEventListener('click', sendCode);
+$('loginEmail').addEventListener('keydown', e => { if (e.key === 'Enter') sendCode(); });
+
+async function sendCode() {
+  const email = $('loginEmail').value.trim().toLowerCase();
+  showErr('err1', '');
+  if (!email.includes('@')) { showErr('err1', 'Please enter a valid email address.'); return; }
+
+  const btn = $('sendBtn');
+  btn.disabled = true; btn.textContent = 'Transmitting…';
+  const r = await api('POST', '/auth/send-otp', { email });
+  btn.disabled = false; btn.textContent = 'Request access code';
+
+  if (r.error) { showErr('err1', r.error); return; }
+
+  $('emailEcho').textContent = email;
+  $('step1').hidden = true;
+  $('step2').hidden = false;
+  clearCode();
+  cells()[0].focus();
+}
+
+const cells = () => [...$('codeRow').querySelectorAll('.code-cell')];
+const codeValue = () => cells().map(c => c.value).join('');
+function clearCode() { cells().forEach(c => { c.value = ''; c.classList.remove('filled'); }); }
+
+$('codeRow').addEventListener('input', e => {
+  const cell = e.target;
+  if (!cell.classList.contains('code-cell')) return;
+  cell.value = cell.value.replace(/\D/g, '').slice(0, 1);
+  cell.classList.toggle('filled', !!cell.value);
+  const i = cells().indexOf(cell);
+  if (cell.value && i < 5) cells()[i + 1].focus();
+  if (codeValue().length === 6) verifyCode();
+});
+
+$('codeRow').addEventListener('keydown', e => {
+  const i = cells().indexOf(e.target);
+  if (i < 0) return;
+  if (e.key === 'Backspace' && !e.target.value && i > 0) { cells()[i - 1].focus(); e.preventDefault(); }
+  if (e.key === 'ArrowLeft'  && i > 0) cells()[i - 1].focus();
+  if (e.key === 'ArrowRight' && i < 5) cells()[i + 1].focus();
+  if (e.key === 'Enter') verifyCode();
+});
+
+$('codeRow').addEventListener('paste', e => {
+  const digits = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+  if (!digits) return;
+  e.preventDefault();
+  cells().forEach((c, i) => { c.value = digits[i] || ''; c.classList.toggle('filled', !!c.value); });
+  cells()[Math.min(digits.length, 5)].focus();
+  if (digits.length === 6) verifyCode();
+});
+
+let verifying = false;
+async function verifyCode() {
+  if (verifying) return;
+  const email = $('loginEmail').value.trim().toLowerCase();
+  const code  = codeValue();
+  showErr('err2', '');
+  if (code.length !== 6) { showErr('err2', 'Enter all six digits.'); return; }
+
+  verifying = true;
+  const btn = $('verifyBtn');
+  btn.disabled = true; btn.textContent = 'Authenticating…';
+  const r = await api('POST', '/auth/verify-otp', { email, code });
+  btn.disabled = false; btn.textContent = 'Authenticate';
+  verifying = false;
+
+  if (r.error) {
+    showErr('err2', r.error);
+    clearCode();
+    cells()[0].focus();
+    return;
+  }
+
+  AUTH.token = r.token;
+  AUTH.user  = r.user;
+  localStorage.setItem(TOKEN_KEY, r.token);
+  await showApp();
+}
+
+$('verifyBtn').addEventListener('click', verifyCode);
+$('backBtn').addEventListener('click', () => {
+  $('step2').hidden = true;
+  $('step1').hidden = false;
+  showErr('err1', ''); showErr('err2', '');
+  clearCode();
+  $('loginEmail').focus();
+});
+
+$('logoutBtn').addEventListener('click', async () => {
+  await api('POST', '/auth/logout');
+  localStorage.removeItem(TOKEN_KEY);
+  location.reload();
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Identity
+══════════════════════════════════════════════════════════════ */
+$('saveNameBtn').addEventListener('click', async () => {
+  const name = $('displayNameInput').value.trim();
+  if (!name) { toast('Please enter a name.', true); return; }
+  const r = await api('PATCH', '/auth/profile', { display_name: name });
+  if (r.error) { toast(r.error, true); return; }
+  AUTH.user = r.user;
+  renderIdentity();
+  closeModal('nameModal');
+  promptFamilyIfNeeded();
+});
+$('displayNameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveNameBtn').click(); });
+
+/* ══════════════════════════════════════════════════════════════
+   Modules
+══════════════════════════════════════════════════════════════ */
+const STATUS_TEXT = { online:'Online', beta:'Beta', planned:'Standby', offline:'Offline' };
+
+async function loadTools() {
+  const grid = $('toolGrid');
+  const r = await api('GET', '/tools');
+  if (r.error) {
+    grid.innerHTML = `<div class="empty">Module registry unavailable — ${esc(r.error)}</div>`;
+    $('toolCount').textContent = '';
+    return;
+  }
+
+  const tools = r.tools || [];
+  const live  = tools.filter(t => t.enabled && (t.status === 'online' || t.status === 'beta')).length;
+  $('toolCount').textContent = `${live} / ${tools.length} online`;
+
+  grid.innerHTML = tools.map(t => {
+    const usable = t.enabled && t.url && (t.status === 'online' || t.status === 'beta') && AUTH.user.family;
+    const chip = !t.enabled
+      ? '<span class="chip locked">Restricted</span>'
+      : `<span class="chip ${esc(t.status)}">${esc(STATUS_TEXT[t.status] || t.status)}</span>`;
+    const cta = !t.enabled            ? 'Access restricted'
+              : !AUTH.user.family     ? 'Awaiting assignment'
+              : usable                ? 'Engage'
+              : 'Coming online';
+
+    return `
+      <article class="tool ${usable ? 'live' : ''} ${t.enabled ? '' : 'locked'}"
+               data-accent="${esc(t.accent)}" data-url="${usable ? esc(t.url) : ''}"
+               ${usable ? 'tabindex="0" role="link"' : ''}>
+        <div class="tool-top">
+          <div class="tool-glyph">${esc(t.glyph)}</div>
+          ${chip}
+        </div>
+        <h3>${esc(t.name)}</h3>
+        <p class="tagline">${esc(t.tagline || '')}</p>
+        <p class="desc">${esc(t.description || '')}</p>
+        <div class="go">${esc(cta)} <span class="arrow">→</span></div>
+      </article>`;
+  }).join('');
+}
+
+function launch(card) {
+  const url = card.dataset.url;
+  if (url) window.open(url, '_blank', 'noopener');
+}
+$('toolGrid').addEventListener('click', e => {
+  const card = e.target.closest('.tool.live');
+  if (card) launch(card);
+});
+$('toolGrid').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const card = e.target.closest('.tool.live');
+  if (card) { e.preventDefault(); launch(card); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Family / crew
+══════════════════════════════════════════════════════════════ */
+async function loadCrew() {
+  const section = $('crewSection');
+  if (!AUTH.user.family) { section.hidden = true; return; }
+
+  const r = await api('GET', '/family');
+  if (r.error || !r.family) { section.hidden = true; return; }
+
+  section.hidden = false;
+  const isParent = AUTH.user.role === 'parent';
+  $('addMemberBtn').hidden = !isParent;
+
+  const members = r.family.members || [];
+  $('crewList').innerHTML = members.map(m => {
+    const name  = m.display_name || m.email.split('@')[0];
+    const canRemove = isParent && m.id !== AUTH.user.id;
+    return `
+      <div class="crew-row">
+        <div class="avatar">${esc(name[0].toUpperCase())}</div>
+        <div class="crew-info">
+          <div class="nm">${esc(name)}</div>
+          <div class="em">${esc(m.email)}</div>
+        </div>
+        <span class="crew-role ${m.role === 'parent' ? '' : 'learner'}">${m.role === 'parent' ? 'Commander' : 'Cadet'}</span>
+        <span class="crew-seen">${esc(relTime(m.last_login_at))}</span>
+        ${canRemove ? `<button class="btn danger sm" data-remove="${esc(m.email)}">Remove</button>` : ''}
+      </div>`;
+  }).join('');
+}
+
+$('crewList').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-remove]');
+  if (!btn) return;
+  const email = btn.dataset.remove;
+  if (!confirm(`Remove ${email} from the crew?`)) return;
+  const r = await api('POST', '/family/members/remove', { email });
+  if (r.error) { toast(r.error, true); return; }
+  toast(`${email} removed.`);
+  await loadCrew();
+});
+
+$('createFamilyBtn').addEventListener('click', async () => {
+  const name = $('familyName').value.trim();
+  showErr('errFamily', '');
+  if (!name) { showErr('errFamily', 'Please enter a family name.'); return; }
+  const r = await api('POST', '/family/create', { name });
+  if (r.error) { showErr('errFamily', r.error); return; }
+
+  const me = await api('GET', '/auth/me');
+  if (me.user) AUTH.user = me.user;
+  closeModal('familyModal');
+  renderIdentity();
+  await Promise.all([loadTools(), loadCrew()]);
+  toast(`${name} registered.`);
+});
+$('familyName').addEventListener('keydown', e => { if (e.key === 'Enter') $('createFamilyBtn').click(); });
+
+$('addMemberBtn').addEventListener('click', () => {
+  $('memberName').value = '';
+  $('memberEmail').value = '';
+  $('roleLearner').checked = true;
+  showErr('errMember', '');
+  openModal('memberModal');
+  $('memberName').focus();
+});
+$('cancelMemberBtn').addEventListener('click', () => closeModal('memberModal'));
+
+$('saveMemberBtn').addEventListener('click', async () => {
+  const display_name = $('memberName').value.trim();
+  const email = $('memberEmail').value.trim().toLowerCase();
+  const role  = document.querySelector('input[name=mrole]:checked').value;
+  showErr('errMember', '');
+  if (!email.includes('@')) { showErr('errMember', 'Please enter a valid email address.'); return; }
+
+  const r = await api('POST', '/family/members/add', { email, display_name, role });
+  if (r.error) { showErr('errMember', r.error); return; }
+  closeModal('memberModal');
+  toast(`${display_name || email} added to the crew.`);
+  await loadCrew();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  closeModal('memberModal');
+});
+
+boot();
+</script>
+</body>
+</html>

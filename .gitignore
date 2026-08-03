@@ -1,0 +1,8 @@
+.wrangler/
+node_modules/
+.dev.vars
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db

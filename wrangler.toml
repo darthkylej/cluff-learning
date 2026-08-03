@@ -1,0 +1,13 @@
+name = "cluff-learning-api"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+keep_vars = true
+
+[secrets]
+required = [
+  "DATABASE_URL",      # Neon pooled connection string
+  "JWT_SECRET",        # long random string
+  "RESEND_API_KEY",    # Resend API key
+  "RESEND_FROM",       # e.g. "Cluff Learning <no-reply@yourdomain.com>"
+  "BOOTSTRAP_EMAILS",  # comma-separated admin emails allowed to self-register
+]
