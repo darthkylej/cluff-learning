@@ -487,6 +487,133 @@ async function handlePutProgress(request, env, slug) {
   });
 }
 
+// ── Spelling (Spell Invaders) handlers ──────────────────────────
+// The word bank is shared platform-wide; only an admin may edit it.
+// Mastery scores are per-player against that shared bank.
+async function requireAdminSession(request, env) {
+  const session = await getSession(request, env);
+  if (!session) return { error: err(request, 'Unauthorized', 401) };
+  if (!session.is_admin) return { error: err(request, 'Admins only.', 403) };
+  return { session };
+}
+
+async function handleGetSpellingWords(request, env) {
+  return withUser(request, env, async (session) => {
+    const r = await query(env,
+      `SELECT w.id, w.word, w.sentence, COALESCE(s.score, 0) AS score
+         FROM spelling_words w
+         LEFT JOIN spelling_word_scores s ON s.word_id = w.id AND s.user_id = $1
+        ORDER BY w.word`,
+      [session.user_id]);
+    return json(request, { words: r.rows || [] });
+  });
+}
+
+async function handleAddSpellingWord(request, env) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+  const body = await request.json();
+  const word = String(body.word || '').trim().slice(0, 80);
+  const sentence = String(body.sentence || '').trim().slice(0, 300);
+  if (!word) return err(request, 'A word is required.');
+  const r = await query(env,
+    `INSERT INTO spelling_words (word, sentence, created_by) VALUES ($1, $2, $3)
+     ON CONFLICT (word) DO UPDATE SET sentence = EXCLUDED.sentence
+     RETURNING id, word, sentence`,
+    [word, sentence, gate.session.user_id]);
+  return json(request, { word: r.rows[0] }, 201);
+}
+
+async function handleBulkAddSpellingWords(request, env) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+  const { rows } = await request.json();
+  if (!Array.isArray(rows) || !rows.length) return err(request, 'rows must be a non-empty array.');
+
+  const clean = []; const seen = new Set();
+  for (const r of rows) {
+    const word = String(r?.word || '').trim().slice(0, 80);
+    if (!word || seen.has(word.toLowerCase())) continue;
+    seen.add(word.toLowerCase());
+    clean.push({ word, sentence: String(r?.sentence || '').trim().slice(0, 300) });
+  }
+  if (!clean.length) return err(request, 'No valid words found.');
+
+  const params = [gate.session.user_id];
+  const rowsSql = []; let p = 2;
+  for (const c of clean) {
+    rowsSql.push(`($${p++}, $${p++}, $1)`);
+    params.push(c.word, c.sentence);
+  }
+  const r = await query(env,
+    `INSERT INTO spelling_words (word, sentence, created_by)
+     VALUES ${rowsSql.join(',')}
+     ON CONFLICT (word) DO UPDATE SET sentence = EXCLUDED.sentence
+     RETURNING id, word, sentence`,
+    params);
+  return json(request, { words: r.rows || [], count: r.rows?.length || 0 }, 201);
+}
+
+async function handleUpdateSpellingWord(request, env, id) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+  const body = await request.json();
+  const sets = []; const vals = []; let i = 1;
+  if (body.word !== undefined) {
+    const word = String(body.word).trim().slice(0, 80);
+    if (!word) return err(request, 'Word cannot be empty.');
+    sets.push(`word = $${i++}`); vals.push(word);
+  }
+  if (body.sentence !== undefined) {
+    sets.push(`sentence = $${i++}`); vals.push(String(body.sentence).trim().slice(0, 300));
+  }
+  if (!sets.length) return err(request, 'Nothing to update.');
+  vals.push(id);
+  const r = await query(env,
+    `UPDATE spelling_words SET ${sets.join(', ')} WHERE id = $${i} RETURNING id, word, sentence`,
+    vals);
+  if (!r.rows?.length) return err(request, 'Word not found.', 404);
+  return json(request, { word: r.rows[0] });
+}
+
+async function handleDeleteSpellingWord(request, env, id) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+  await query(env, `DELETE FROM spelling_words WHERE id = $1`, [id]);
+  return json(request, { ok: true });
+}
+
+async function handleBulkScores(request, env) {
+  return withUser(request, env, async (session) => {
+    const { deltas } = await request.json();
+    if (!Array.isArray(deltas) || !deltas.length) return json(request, { ok: true });
+
+    const byWord = new Map();
+    for (const d of deltas) {
+      const wordId = String(d?.word_id || '');
+      const delta = Math.trunc(Number(d?.delta) || 0);
+      if (!wordId || !delta) continue;
+      byWord.set(wordId, (byWord.get(wordId) || 0) + delta);
+    }
+    if (!byWord.size) return json(request, { ok: true });
+
+    const params = [session.user_id];
+    const rowsSql = []; let p = 2;
+    for (const [wordId, delta] of byWord) {
+      rowsSql.push(`($1, $${p++}, $${p++})`);
+      params.push(wordId, Math.max(-10, Math.min(10, delta)));
+    }
+    await query(env,
+      `INSERT INTO spelling_word_scores (user_id, word_id, score)
+       VALUES ${rowsSql.join(',')}
+       ON CONFLICT (user_id, word_id) DO UPDATE SET
+         score = GREATEST(-10, LEAST(10, spelling_word_scores.score + EXCLUDED.score)),
+         updated_at = NOW()`,
+      params);
+    return json(request, { ok: true });
+  });
+}
+
 // ── Router ─────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -518,6 +645,15 @@ export default {
       const progressMatch = path.match(/^\/progress\/([a-z0-9-]{1,40})$/);
       if (progressMatch && method === 'GET') return await handleGetProgress(request, env, progressMatch[1]);
       if (progressMatch && method === 'PUT') return await handlePutProgress(request, env, progressMatch[1]);
+
+      if (path === '/spelling/words'      && method === 'GET')  return await handleGetSpellingWords(request, env);
+      if (path === '/spelling/words'      && method === 'POST') return await handleAddSpellingWord(request, env);
+      if (path === '/spelling/words/bulk' && method === 'POST') return await handleBulkAddSpellingWords(request, env);
+      if (path === '/spelling/scores/bulk' && method === 'POST') return await handleBulkScores(request, env);
+
+      const spellingWordMatch = path.match(/^\/spelling\/words\/([0-9a-fA-F-]{36})$/);
+      if (spellingWordMatch && method === 'PATCH')  return await handleUpdateSpellingWord(request, env, spellingWordMatch[1]);
+      if (spellingWordMatch && method === 'DELETE') return await handleDeleteSpellingWord(request, env, spellingWordMatch[1]);
 
       return err(request, 'Not found', 404);
     } catch (e) {

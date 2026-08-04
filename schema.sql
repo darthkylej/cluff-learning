@@ -131,9 +131,9 @@ INSERT INTO tools (slug, name, tagline, description, glyph, accent, status, url,
    'Write real code with an AI mentor that teaches instead of doing the work for you.',
    '⌘', 'cyan',   'online',  'https://darthkylej.github.io/Safe-Coding-Helper-for-Kids/', 10),
 
-  ('spelling-drill', 'Spelling Drill',  'Adaptive spelling practice',
-   'Word lists that adapt to the words you keep missing, with instant feedback.',
-   '◆', 'amber',  'planned', NULL, 20),
+  ('spelling-drill', 'Spell Invaders',  'Adaptive spelling practice',
+   'Spell your way to credits, then arm your ship and defend Earth. Word mastery is tracked per player.',
+   '◆', 'amber',  'online',  'https://darthkylej.github.io/cluff-learning/games/spell-invaders.html', 20),
 
   ('spanish-tutor',  'Spanish Comms',   'Live conversation practice',
    'Talk with an AI conversation partner in Spanish at your level, with gentle correction.',
@@ -152,4 +152,29 @@ ON CONFLICT (slug) DO UPDATE SET
   description = EXCLUDED.description,
   glyph       = EXCLUDED.glyph,
   accent      = EXCLUDED.accent,
+  status      = EXCLUDED.status,
+  url         = EXCLUDED.url,
   sort_order  = EXCLUDED.sort_order;
+
+-- ── Spell Invaders: shared word bank ────────────────────────────
+-- One word bank for the whole platform (not scoped to a family).
+-- Only an admin (users.is_admin) may add, edit, or remove words.
+-- Case-insensitive on `word` so "Because" and "because" collide.
+CREATE TABLE IF NOT EXISTS spelling_words (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  word       citext NOT NULL UNIQUE,
+  sentence   text NOT NULL DEFAULT '',
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Per-player mastery score against the shared bank, -10..10,
+-- mirroring the old CSV `score` column. Absent row = untried (0).
+CREATE TABLE IF NOT EXISTS spelling_word_scores (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  word_id    uuid NOT NULL REFERENCES spelling_words(id) ON DELETE CASCADE,
+  score      int NOT NULL DEFAULT 0 CHECK (score BETWEEN -10 AND 10),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, word_id)
+);
+CREATE INDEX IF NOT EXISTS spelling_word_scores_user_idx ON spelling_word_scores (user_id);
