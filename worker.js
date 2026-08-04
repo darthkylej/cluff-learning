@@ -20,6 +20,22 @@
      GET    /progress/:slug
      PUT    /progress/:slug
 
+     GET    /spelling/words
+     POST   /spelling/words
+     POST   /spelling/words/bulk
+     PATCH  /spelling/words/:id
+     DELETE /spelling/words/:id
+     POST   /spelling/scores/bulk
+
+     POST   /essays/assignments
+     GET    /essays/assignments
+     GET    /essays/assignments/:id/essay
+     PUT    /essays/assignments/:id/essay/draft
+     POST   /essays/assignments/:id/essay/grade
+     PUT    /essays/assignments/:id/essay/practice
+     POST   /essays/assignments/:id/essay/coaching/check
+     GET    /essays/assignments/:id/essay/:studentId/results
+
    Registration is closed. An email can only request a login code
    if a users row already exists for it — created either by a
    parent via /family/members/add, or by listing the address in
@@ -614,6 +630,519 @@ async function handleBulkScores(request, env) {
   });
 }
 
+// ── Essay Coach ──────────────────────────────────────────────────
+// Assignments are family-scoped (a parent writes a prompt for their
+// own kids), unlike the platform-wide spelling word bank.
+const CLAUDE_MODEL = 'claude-sonnet-5';
+
+const ESSAY_RUBRIC = {
+  mechanics:    { max: 20, label: 'Mechanics (spelling, grammar, punctuation)' },
+  word_choice:  { max: 15, label: 'Word choice & voice' },
+  organization: { max: 15, label: 'Organization & flow' },
+  argument:     { max: 25, label: 'Argument quality (logic, evidence, avoiding fallacies)' },
+  persuasion:   { max: 15, label: 'Persuasiveness & rhetorical craft' },
+  polish:       { max: 10, label: 'Holistic college-readiness & polish' },
+};
+const ISSUE_TIERS = ['mechanics', 'clarity', 'organization', 'argument', 'rhetoric'];
+
+function clampInt(v, lo, hi) {
+  const n = Math.round(Number(v) || 0);
+  return Math.max(lo, Math.min(hi, n));
+}
+
+async function callClaude(env, { system, content, tool }) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 8000,
+      system,
+      messages: [{ role: 'user', content }],
+      tools: [tool],
+      tool_choice: { type: 'tool', name: tool.name },
+    }),
+  });
+  if (!res.ok) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 400)}`);
+  const data = await res.json();
+  const block = (data.content || []).find(c => c.type === 'tool_use' && c.name === tool.name);
+  if (!block) throw new Error('Claude did not return the expected result.');
+  return block.input;
+}
+
+const GRADE_TOOL = {
+  name: 'submit_essay_grade',
+  description: 'Submit the complete grading result for a student essay.',
+  input_schema: {
+    type: 'object',
+    required: ['sentences', 'rubric', 'strengths', 'overall_feedback', 'issues_catalog'],
+    properties: {
+      sentences: {
+        type: 'array',
+        description: 'The essay split into sentences, original order, covering the ENTIRE text with nothing omitted, reworded, or summarized.',
+        items: {
+          type: 'object',
+          required: ['text', 'issues'],
+          properties: {
+            text: { type: 'string' },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['type', 'severity', 'note'],
+                properties: {
+                  type:       { type: 'string', description: 'short slug, e.g. subject_verb_agreement, comma_splice, weak_word_choice' },
+                  severity:   { type: 'string', enum: ['minor', 'moderate', 'major'] },
+                  note:       { type: 'string' },
+                  suggestion: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+      rubric: {
+        type: 'object',
+        required: Object.keys(ESSAY_RUBRIC),
+        properties: Object.fromEntries(Object.entries(ESSAY_RUBRIC).map(([k, v]) => [k, {
+          type: 'object',
+          required: ['score', 'notes'],
+          properties: {
+            score: { type: 'integer', minimum: 0, maximum: v.max },
+            notes: { type: 'string' },
+          },
+        }])),
+      },
+      strengths:         { type: 'array', items: { type: 'string' }, description: '2-4 specific, genuine things this essay does well.' },
+      overall_feedback:  { type: 'string', description: 'A few paragraphs on flow, organization, voice, consistency, persuasiveness, and any logical fallacies.' },
+      length_assessment: { type: 'string', description: 'One sentence on whether the length was reasonable for making the point — not a word-count judgment.' },
+      issues_catalog: {
+        type: 'array',
+        description: 'Every distinct issue found anywhere in the essay, deduplicated by type.',
+        items: {
+          type: 'object',
+          required: ['issue_type', 'tier', 'severity', 'description'],
+          properties: {
+            issue_type:  { type: 'string' },
+            tier:        { type: 'string', enum: ISSUE_TIERS },
+            severity:    { type: 'string', enum: ['minor', 'moderate', 'major'] },
+            description: { type: 'string' },
+            quote:       { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+};
+
+const COACHING_CHECK_TOOL = {
+  name: 'submit_fix_verdict',
+  description: 'Judge whether the student made a genuine, reasonable effort to fix the described issue.',
+  input_schema: {
+    type: 'object',
+    required: ['verdict', 'note'],
+    properties: {
+      verdict: { type: 'string', enum: ['resolved', 'partial', 'not_addressed'] },
+      note:    { type: 'string', description: 'One or two sentences, encouraging but honest, addressed directly to the student.' },
+    },
+  },
+};
+
+function buildGradingSystemPrompt(assignment, issueHistory) {
+  const rubricLines = Object.entries(ESSAY_RUBRIC).map(([, v]) => `- ${v.label}: ${v.max} points`).join('\n');
+  const historyLines = (issueHistory || []).length
+    ? issueHistory.map(h => `- ${h.issue_type} (${h.tier}): flagged in ${h.times_flagged} previous essay(s), recurred ${h.times_recurred_after_flagged} time(s) after being told about it`).join('\n')
+    : '(no prior essays on record for this student)';
+
+  return `You are a rigorous, fair college writing instructor grading a first-year college-level essay. Grade honestly and consistently — do not adjust the rubric for the student's age or grade level; grade the writing itself as if it were submitted to a college composition course.
+
+RUBRIC (100 points total, score each category independently):
+${rubricLines}
+
+A 100 means: no spelling or grammar errors, a clear and persuasive message with strong support, eloquent word choice suited to the topic without being pretentious, and writing that would score well in a first-year college writing class.
+
+Do not grade on raw length. The length guidance below is a soft target — judge whether the essay makes its point clearly without belaboring it and without skimping. Reward rich, specific writing: concrete examples, apt literary devices, references, facts, and rhetorical technique used well. Penalize padding, vagueness, and unsupported claims.
+
+ASSIGNMENT PROMPT:
+"""
+${assignment.prompt}
+"""
+Length guidance given to the student: ${assignment.length_guidance || '(none specified)'}
+
+THIS STUDENT'S RECURRING ISSUE HISTORY (from past essays):
+${historyLines}
+If an issue below recurs from this history, say so plainly in your feedback and treat it as more serious than a first-time slip — the student has already been told.
+
+Segment the essay into sentences covering the ENTIRE text with nothing omitted or reworded, and call the submit_essay_grade tool with your complete result. Be specific in every note — cite the actual words, not just the category.`;
+}
+
+function buildCoachingCheckPrompt(issue) {
+  return `You are coaching a student revising their own essay. Here is one specific issue that was flagged:
+
+Type: ${issue.issue_type}
+Original problem: ${issue.description}
+${issue.quote ? `Original text: "${issue.quote}"` : ''}
+
+Below is the student's CURRENT full essay text after revision. Judge whether this specific issue has been genuinely, reasonably addressed.
+- "resolved": clearly fixed.
+- "partial": a real, good-faith attempt that improves things, even if not perfect.
+- "not_addressed": the issue is still there, or the student didn't seriously try.
+Be encouraging but honest — don't rubber-stamp a fix that isn't there, but don't demand perfection either. Call submit_fix_verdict with your result.`;
+}
+
+function selectTopIssues(catalog, history) {
+  const historyByType = new Map((history || []).map(h => [h.issue_type, h]));
+  const tierRank = t => { const i = ISSUE_TIERS.indexOf(t); return i >= 0 ? i : 0; };
+  const scored = (catalog || []).map(issue => {
+    const type = String(issue.issue_type || '').trim();
+    const h = historyByType.get(type);
+    const recurrence = h ? h.times_recurred_after_flagged : 0;
+    // Issues the student has been told about repeatedly jump the queue,
+    // regardless of tier — everything else follows foundational-first order.
+    const priority = recurrence >= 2 ? -100 : tierRank(issue.tier);
+    return { issue, type, priority, recurrence };
+  }).sort((a, b) => a.priority - b.priority || b.recurrence - a.recurrence);
+
+  const picked = []; const seen = new Set();
+  for (const s of scored) {
+    if (!s.type || seen.has(s.type)) continue;
+    seen.add(s.type);
+    picked.push(s.issue);
+    if (picked.length >= 5) break;
+  }
+  return picked;
+}
+
+function computeAdaptiveScore(scoreTotal, priorScores, persistentOffender) {
+  let adaptive;
+  if (!priorScores.length) {
+    // First essay ever: compress upward so a rough first attempt still
+    // feels encouraging, while leaving clear room to grow.
+    adaptive = 55 + scoreTotal * 0.45;
+  } else {
+    const baseline = priorScores.reduce((a, b) => a + b, 0) / priorScores.length;
+    const delta = scoreTotal - baseline;
+    // Reward improvement generously; soften but don't erase a decline.
+    adaptive = 78 + delta * (delta >= 0 ? 2.2 : 1.3);
+  }
+  if (persistentOffender) adaptive -= 9; // told repeatedly, still unresolved
+  return clampInt(adaptive, 35, 100);
+}
+
+function stripScoresForLearner(feedback) {
+  const copy = JSON.parse(JSON.stringify(feedback || {}));
+  if (copy.rubric) {
+    for (const k of Object.keys(copy.rubric)) {
+      if (copy.rubric[k] && typeof copy.rubric[k] === 'object') delete copy.rubric[k].score;
+    }
+  }
+  return copy;
+}
+
+async function requireParentSession(request, env) {
+  const session = await getSession(request, env);
+  if (!session) return { error: err(request, 'Unauthorized', 401) };
+  const family = await getMembership(env, session.user_id);
+  if (!family) return { error: err(request, 'You are not in a family yet.') };
+  if (family.role !== 'parent') return { error: err(request, 'Only a parent can do this.', 403) };
+  return { session, family };
+}
+
+async function getOrCreateEssay(env, assignmentId, userId) {
+  const existing = await query(env, `SELECT * FROM essays WHERE assignment_id = $1 AND user_id = $2`, [assignmentId, userId]);
+  if (existing.rows?.length) return existing.rows[0];
+  const created = await query(env,
+    `INSERT INTO essays (assignment_id, user_id) VALUES ($1, $2)
+     ON CONFLICT (assignment_id, user_id) DO NOTHING RETURNING *`,
+    [assignmentId, userId]);
+  if (created.rows?.length) return created.rows[0];
+  const retry = await query(env, `SELECT * FROM essays WHERE assignment_id = $1 AND user_id = $2`, [assignmentId, userId]);
+  return retry.rows[0];
+}
+
+async function handleCreateAssignment(request, env) {
+  const gate = await requireParentSession(request, env);
+  if (gate.error) return gate.error;
+  const body = await request.json();
+  const title = String(body.title || '').trim().slice(0, 120);
+  const prompt = String(body.prompt || '').trim();
+  const lengthGuidance = String(body.length_guidance || '').trim().slice(0, 300);
+  const studentIds = Array.isArray(body.student_ids) ? body.student_ids.filter(Boolean) : [];
+  if (!title || !prompt) return err(request, 'Title and prompt are required.');
+  if (!studentIds.length) return err(request, 'Pick at least one student.');
+
+  const members = await query(env,
+    `SELECT user_id FROM family_members WHERE family_id = $1 AND user_id = ANY($2::uuid[])`,
+    [gate.family.id, studentIds]);
+  const validIds = new Set((members.rows || []).map(r => r.user_id));
+  const targets = studentIds.filter(id => validIds.has(id));
+  if (!targets.length) return err(request, 'None of those students are in your family.');
+
+  const ar = await query(env,
+    `INSERT INTO essay_assignments (family_id, created_by, title, prompt, length_guidance)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [gate.family.id, gate.session.user_id, title, prompt, lengthGuidance]);
+  const assignmentId = ar.rows[0].id;
+
+  const params = [assignmentId]; const rowsSql = []; let p = 2;
+  for (const id of targets) { rowsSql.push(`($1, $${p++})`); params.push(id); }
+  await query(env, `INSERT INTO essay_assignment_targets (assignment_id, user_id) VALUES ${rowsSql.join(',')}`, params);
+
+  return json(request, { ok: true, assignment_id: assignmentId }, 201);
+}
+
+async function handleListAssignments(request, env) {
+  return withUser(request, env, async (session) => {
+    const family = await getMembership(env, session.user_id);
+    if (!family) return json(request, { assignments: [], role: null });
+
+    if (family.role === 'parent') {
+      const r = await query(env,
+        `SELECT a.id, a.title, a.prompt, a.length_guidance, a.created_at,
+                json_agg(json_build_object(
+                  'user_id', u.id, 'display_name', u.display_name, 'email', u.email,
+                  'status', COALESCE(e.status, 'not_started'),
+                  'score_total', e.score_total, 'adaptive_score', e.adaptive_score,
+                  'graded_at', e.graded_at
+                ) ORDER BY u.display_name) AS targets
+           FROM essay_assignments a
+           JOIN essay_assignment_targets t ON t.assignment_id = a.id
+           JOIN users u ON u.id = t.user_id
+           LEFT JOIN essays e ON e.assignment_id = a.id AND e.user_id = u.id
+          WHERE a.family_id = $1
+          GROUP BY a.id
+          ORDER BY a.created_at DESC`,
+        [family.id]);
+      return json(request, { assignments: r.rows || [], role: 'parent' });
+    }
+
+    const r = await query(env,
+      `SELECT a.id, a.title, a.prompt, a.length_guidance, a.created_at,
+              COALESCE(e.status, 'not_started') AS status, e.adaptive_score, e.graded_at
+         FROM essay_assignments a
+         JOIN essay_assignment_targets t ON t.assignment_id = a.id AND t.user_id = $1
+         LEFT JOIN essays e ON e.assignment_id = a.id AND e.user_id = $1
+        ORDER BY a.created_at DESC`,
+      [session.user_id]);
+    return json(request, { assignments: r.rows || [], role: 'learner' });
+  });
+}
+
+async function handleGetEssay(request, env, assignmentId) {
+  return withUser(request, env, async (session) => {
+    const target = await query(env,
+      `SELECT 1 FROM essay_assignment_targets WHERE assignment_id = $1 AND user_id = $2`,
+      [assignmentId, session.user_id]);
+    if (!target.rows?.length) return err(request, 'Not found.', 404);
+
+    const ar = await query(env, `SELECT id, title, prompt, length_guidance FROM essay_assignments WHERE id = $1`, [assignmentId]);
+    if (!ar.rows?.length) return err(request, 'Not found.', 404);
+
+    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    return json(request, {
+      assignment: ar.rows[0],
+      essay: { id: essay.id, status: essay.status, draft_text: essay.draft_text, draft_updated_at: essay.draft_updated_at },
+    });
+  });
+}
+
+async function handleSaveDraft(request, env, assignmentId) {
+  return withUser(request, env, async (session) => {
+    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (essay.status === 'graded') return err(request, 'This essay has already been graded.', 409);
+    const { draft_text } = await request.json();
+    await query(env, `UPDATE essays SET draft_text = $1, draft_updated_at = NOW() WHERE id = $2`,
+      [String(draft_text ?? ''), essay.id]);
+    return json(request, { ok: true });
+  });
+}
+
+async function handleGradeEssay(request, env, assignmentId) {
+  return withUser(request, env, async (session) => {
+    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (essay.status === 'graded') return err(request, 'This essay has already been graded.', 409);
+    if (!essay.draft_text || !essay.draft_text.trim()) return err(request, 'Write something before grading.');
+
+    const ar = await query(env, `SELECT * FROM essay_assignments WHERE id = $1`, [assignmentId]);
+    const assignment = ar.rows?.[0];
+    if (!assignment) return err(request, 'Assignment not found.', 404);
+
+    await query(env, `UPDATE essays SET status = 'grading' WHERE id = $1`, [essay.id]);
+
+    const historyR = await query(env,
+      `SELECT issue_type, tier, times_flagged, times_recurred_after_flagged
+         FROM essay_issue_history WHERE user_id = $1
+        ORDER BY times_recurred_after_flagged DESC, times_flagged DESC LIMIT 20`,
+      [session.user_id]);
+
+    let result;
+    try {
+      result = await callClaude(env, {
+        system: buildGradingSystemPrompt(assignment, historyR.rows || []),
+        content: essay.draft_text,
+        tool: GRADE_TOOL,
+      });
+    } catch (e) {
+      await query(env, `UPDATE essays SET status = 'draft' WHERE id = $1`, [essay.id]);
+      return err(request, `Grading failed: ${e.message}`, 502);
+    }
+
+    const rebuilt = (result.sentences || []).map(s => s.text).join(' ').replace(/\s+/g, ' ').trim();
+    const original = essay.draft_text.replace(/\s+/g, ' ').trim();
+    if (rebuilt.length < original.length * 0.7) {
+      await query(env, `UPDATE essays SET status = 'draft' WHERE id = $1`, [essay.id]);
+      return err(request, 'Grading response looked incomplete — please try again.', 502);
+    }
+
+    const rubric = result.rubric || {};
+    const scoreTotal = clampInt(
+      Object.entries(ESSAY_RUBRIC).reduce((sum, [k, v]) => sum + clampInt(rubric[k]?.score, 0, v.max), 0),
+      0, 100);
+
+    const catalog = Array.isArray(result.issues_catalog) ? result.issues_catalog : [];
+    for (const issue of catalog) {
+      const type = String(issue.issue_type || '').trim().slice(0, 60);
+      if (!type) continue;
+      const tier = ISSUE_TIERS.includes(issue.tier) ? issue.tier : 'mechanics';
+      const existing = await query(env,
+        `SELECT times_flagged FROM essay_issue_history WHERE user_id = $1 AND issue_type = $2`,
+        [session.user_id, type]);
+      const recurred = (existing.rows?.[0]?.times_flagged || 0) > 0 ? 1 : 0;
+      await query(env,
+        `INSERT INTO essay_issue_history (user_id, issue_type, tier, times_flagged, times_recurred_after_flagged, first_seen_essay_id, last_seen_essay_id)
+         VALUES ($1, $2, $3, 1, $4, $5, $5)
+         ON CONFLICT (user_id, issue_type) DO UPDATE SET
+           times_flagged = essay_issue_history.times_flagged + 1,
+           times_recurred_after_flagged = essay_issue_history.times_recurred_after_flagged + $4,
+           tier = EXCLUDED.tier, last_seen_essay_id = EXCLUDED.last_seen_essay_id, updated_at = NOW()`,
+        [session.user_id, type, tier, recurred, essay.id]);
+    }
+
+    const topFive = selectTopIssues(catalog, historyR.rows || []);
+    for (const issue of topFive) {
+      await query(env,
+        `UPDATE essay_issue_history SET times_in_top_five = times_in_top_five + 1, updated_at = NOW()
+          WHERE user_id = $1 AND issue_type = $2`,
+        [session.user_id, String(issue.issue_type || '').trim().slice(0, 60)]);
+    }
+
+    const priorR = await query(env,
+      `SELECT score_total FROM essays WHERE user_id = $1 AND status = 'graded' AND id != $2
+        ORDER BY graded_at DESC LIMIT 5`,
+      [session.user_id, essay.id]);
+    const priorScores = (priorR.rows || []).map(r => r.score_total).filter(n => n != null);
+    const persistentOffender = (historyR.rows || []).some(h =>
+      h.times_recurred_after_flagged >= 3 && catalog.some(c => c.issue_type === h.issue_type));
+    const adaptiveScore = computeAdaptiveScore(scoreTotal, priorScores, persistentOffender);
+
+    const feedback = {
+      sentences: result.sentences || [], rubric, strengths: result.strengths || [],
+      overall_feedback: result.overall_feedback || '', issues_catalog: catalog,
+      top_issues: topFive, length_assessment: result.length_assessment || '',
+    };
+    const coaching = {
+      practice_text: essay.draft_text,
+      issues: topFive.map(issue => ({ ...issue, status: 'open', attempts: 0 })),
+      completed: topFive.length === 0,
+    };
+
+    await query(env,
+      `UPDATE essays SET status = 'graded', original_text = $1, score_total = $2, adaptive_score = $3,
+         feedback = $4::jsonb, coaching = $5::jsonb, graded_at = NOW() WHERE id = $6`,
+      [essay.draft_text, scoreTotal, adaptiveScore, JSON.stringify(feedback), JSON.stringify(coaching), essay.id]);
+
+    return json(request, { ok: true, adaptive_score: adaptiveScore, feedback: stripScoresForLearner(feedback), coaching });
+  });
+}
+
+async function handleSavePractice(request, env, assignmentId) {
+  return withUser(request, env, async (session) => {
+    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (essay.status !== 'graded') return err(request, 'Grade the essay first.', 409);
+    const { practice_text } = await request.json();
+    const coaching = essay.coaching || {};
+    coaching.practice_text = String(practice_text ?? '');
+    await query(env, `UPDATE essays SET coaching = $1::jsonb WHERE id = $2`, [JSON.stringify(coaching), essay.id]);
+    return json(request, { ok: true });
+  });
+}
+
+async function handleCoachingCheck(request, env, assignmentId) {
+  return withUser(request, env, async (session) => {
+    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (essay.status !== 'graded') return err(request, 'Grade the essay first.', 409);
+    const { issue_index } = await request.json();
+    const coaching = essay.coaching || { issues: [], practice_text: essay.original_text || '' };
+    const issue = coaching.issues?.[issue_index];
+    if (!issue) return err(request, 'No such issue.', 404);
+    if (issue.status && issue.status !== 'open') return json(request, { coaching });
+
+    let verdict;
+    try {
+      verdict = await callClaude(env, {
+        system: buildCoachingCheckPrompt(issue),
+        content: coaching.practice_text || '',
+        tool: COACHING_CHECK_TOOL,
+      });
+    } catch (e) {
+      return err(request, `Check failed: ${e.message}`, 502);
+    }
+
+    issue.attempts = (issue.attempts || 0) + 1;
+    issue.last_note = verdict.note || '';
+    if (verdict.verdict === 'not_addressed' && issue.attempts < 3) issue.status = 'open';
+    else if (verdict.verdict === 'resolved') issue.status = 'resolved';
+    else if (verdict.verdict === 'partial') issue.status = 'partial';
+    else issue.status = 'accepted'; // hit the attempt cap — accept best effort and move on
+
+    coaching.completed = (coaching.issues || []).every(i => i.status !== 'open');
+
+    await query(env,
+      `UPDATE essays SET coaching = $1::jsonb, coaching_completed_at = $2 WHERE id = $3`,
+      [JSON.stringify(coaching), coaching.completed ? new Date().toISOString() : null, essay.id]);
+
+    return json(request, { verdict, coaching });
+  });
+}
+
+async function handleGetEssayResults(request, env, assignmentId, studentId) {
+  return withUser(request, env, async (session) => {
+    const family = await getMembership(env, session.user_id);
+    const isSelf = session.user_id === studentId;
+    const isParent = !!(family && family.role === 'parent');
+    if (!isSelf && !isParent) return err(request, 'Not found.', 404);
+
+    if (isParent && !isSelf) {
+      const owns = await query(env, `SELECT 1 FROM essay_assignments WHERE id = $1 AND family_id = $2`,
+        [assignmentId, family.id]);
+      if (!owns.rows?.length) return err(request, 'Not found.', 404);
+    }
+
+    const r = await query(env,
+      `SELECT e.*, u.display_name, u.email FROM essays e JOIN users u ON u.id = e.user_id
+        WHERE e.assignment_id = $1 AND e.user_id = $2`,
+      [assignmentId, studentId]);
+    const essay = r.rows?.[0];
+    if (!essay || essay.status !== 'graded') return err(request, 'Not graded yet.', 404);
+
+    const payload = {
+      student: { id: studentId, display_name: essay.display_name, email: essay.email },
+      original_text: essay.original_text,
+      adaptive_score: essay.adaptive_score,
+      feedback: isParent ? essay.feedback : stripScoresForLearner(essay.feedback),
+      coaching: essay.coaching,
+      coaching_completed_at: essay.coaching_completed_at,
+      graded_at: essay.graded_at,
+    };
+    if (isParent) payload.score_total = essay.score_total;
+    return json(request, payload);
+  });
+}
+
 // ── Router ─────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -654,6 +1183,27 @@ export default {
       const spellingWordMatch = path.match(/^\/spelling\/words\/([0-9a-fA-F-]{36})$/);
       if (spellingWordMatch && method === 'PATCH')  return await handleUpdateSpellingWord(request, env, spellingWordMatch[1]);
       if (spellingWordMatch && method === 'DELETE') return await handleDeleteSpellingWord(request, env, spellingWordMatch[1]);
+
+      if (path === '/essays/assignments' && method === 'POST') return await handleCreateAssignment(request, env);
+      if (path === '/essays/assignments' && method === 'GET')  return await handleListAssignments(request, env);
+
+      const essayMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay$/);
+      if (essayMatch && method === 'GET') return await handleGetEssay(request, env, essayMatch[1]);
+
+      const draftMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay\/draft$/);
+      if (draftMatch && method === 'PUT') return await handleSaveDraft(request, env, draftMatch[1]);
+
+      const gradeMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay\/grade$/);
+      if (gradeMatch && method === 'POST') return await handleGradeEssay(request, env, gradeMatch[1]);
+
+      const practiceMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay\/practice$/);
+      if (practiceMatch && method === 'PUT') return await handleSavePractice(request, env, practiceMatch[1]);
+
+      const checkMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay\/coaching\/check$/);
+      if (checkMatch && method === 'POST') return await handleCoachingCheck(request, env, checkMatch[1]);
+
+      const resultsMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay\/([0-9a-fA-F-]{36})\/results$/);
+      if (resultsMatch && method === 'GET') return await handleGetEssayResults(request, env, resultsMatch[1], resultsMatch[2]);
 
       return err(request, 'Not found', 404);
     } catch (e) {

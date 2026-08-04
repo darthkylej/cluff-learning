@@ -139,9 +139,9 @@ INSERT INTO tools (slug, name, tagline, description, glyph, accent, status, url,
    'Talk with an AI conversation partner in Spanish at your level, with gentle correction.',
    '⌬', 'violet', 'planned', NULL, 30),
 
-  ('essay-coach',    'Essay Coach',     'Structure, drafting, and revision',
-   'Plan, draft, and revise essays with feedback on structure, evidence, and clarity.',
-   '▤', 'green',  'planned', NULL, 40),
+  ('essay-coach',    'Essay Coach',     'College-level essay grading and coaching',
+   'Write to a prompt your parent sets and get sentence-by-sentence feedback plus honest, college-level grading.',
+   '▤', 'green',  'online',  'https://darthkylej.github.io/cluff-learning/essay-coach.html', 40),
 
   ('typing-trainer', 'Typing Trainer',  'Speed and accuracy drills',
    'Build muscle memory with timed drills and accuracy tracking.',
@@ -178,3 +178,65 @@ CREATE TABLE IF NOT EXISTS spelling_word_scores (
   PRIMARY KEY (user_id, word_id)
 );
 CREATE INDEX IF NOT EXISTS spelling_word_scores_user_idx ON spelling_word_scores (user_id);
+
+-- ── Essay Coach ──────────────────────────────────────────────────
+-- A parent writes a prompt and assigns it to one or more of their
+-- own kids. Family-scoped (unlike the platform-wide spelling bank),
+-- since a writing prompt is set by and for one family.
+CREATE TABLE IF NOT EXISTS essay_assignments (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  family_id       uuid NOT NULL REFERENCES families(id) ON DELETE CASCADE,
+  created_by      uuid REFERENCES users(id) ON DELETE SET NULL,
+  title           text NOT NULL,
+  prompt          text NOT NULL,
+  length_guidance text NOT NULL DEFAULT '',
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS essay_assignment_targets (
+  assignment_id uuid NOT NULL REFERENCES essay_assignments(id) ON DELETE CASCADE,
+  user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (assignment_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS essay_assignment_targets_user_idx ON essay_assignment_targets (user_id);
+
+-- One essay per (assignment, student). `original_text` is frozen at
+-- the moment the student clicks Grade — that text and the score
+-- computed from it never change again. Everything after grading
+-- (the 5-issue coaching loop) writes into `coaching` on a practice
+-- copy and never touches original_text or score_total.
+CREATE TABLE IF NOT EXISTS essays (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assignment_id          uuid NOT NULL REFERENCES essay_assignments(id) ON DELETE CASCADE,
+  user_id                uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status                 text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','grading','graded')),
+  draft_text             text NOT NULL DEFAULT '',
+  draft_updated_at       timestamptz NOT NULL DEFAULT now(),
+  original_text          text,          -- frozen at grading time; this is what was scored
+  score_total            int,           -- 0..100, the real/objective score — never shown raw to a struggling student
+  adaptive_score         int,           -- 0..100, the score actually presented to the student
+  feedback               jsonb,         -- rubric breakdown, sentence annotations, top-5 issues, narrative feedback
+  coaching                jsonb,         -- post-grade practice state: practice_text + per-issue status/attempts
+  graded_at              timestamptz,
+  coaching_completed_at  timestamptz,
+  UNIQUE (assignment_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS essays_user_idx ON essays (user_id);
+
+-- Per-student recurring-weakness ledger. Every issue Claude finds
+-- (not just the 5 chosen for coaching) updates this, so future
+-- grading calls know the difference between "first time seeing
+-- this" and "flagged four essays running" — and the adaptive score
+-- can dock a student who never fixes something they've been told.
+CREATE TABLE IF NOT EXISTS essay_issue_history (
+  user_id                       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  issue_type                    text NOT NULL,
+  tier                          text NOT NULL CHECK (tier IN ('mechanics','clarity','organization','argument','rhetoric')),
+  times_flagged                 int NOT NULL DEFAULT 0,
+  times_in_top_five             int NOT NULL DEFAULT 0,
+  times_recurred_after_flagged  int NOT NULL DEFAULT 0,
+  first_seen_essay_id           uuid REFERENCES essays(id) ON DELETE SET NULL,
+  last_seen_essay_id            uuid REFERENCES essays(id) ON DELETE SET NULL,
+  updated_at                    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, issue_type)
+);

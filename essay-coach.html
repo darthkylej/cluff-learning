@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#04070f">
+<title>Essay Coach — Cluff Learning Systems</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23050912'/><path d='M16 5 L26 27 L16 22 L6 27 Z' fill='%2334d399'/></svg>">
+<style>
+/* ══════════════════════════════════════════════════════════════
+   ESSAY COACH — shares the bridge design system with index.html
+══════════════════════════════════════════════════════════════ */
+:root{
+  --void:#04070f; --deep:#070c18; --panel:rgba(9,16,31,.74); --panel-solid:#0a1120; --raise:rgba(19,32,56,.6);
+  --line:rgba(79,209,224,.16); --line-mid:rgba(79,209,224,.30); --line-hot:rgba(79,209,224,.55);
+  --text:#dce8f6; --text-bright:#f2f8ff; --dim:#7b95b4; --faint:#4e6485;
+  --cyan:#4fd1e0; --amber:#f5a524; --violet:#a78bfa; --green:#34d399; --rose:#fb7185;
+  --font-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono',Consolas,'Liberation Mono',monospace;
+  --r:4px; --ease:cubic-bezier(.22,.9,.28,1);
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;min-height:100%;background:var(--void);color:var(--text);font-family:var(--font-ui);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+#starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+.ambient{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(900px 620px at 12% -8%, rgba(79,209,224,.14), transparent 62%),
+             radial-gradient(760px 540px at 92% 4%,  rgba(52,211,153,.10), transparent 60%),
+             radial-gradient(1100px 700px at 50% 118%, rgba(245,165,36,.07), transparent 65%);}
+.vignette{position:fixed;inset:0;z-index:1;pointer-events:none;box-shadow:inset 0 0 220px 40px rgba(0,0,0,.85)}
+
+.panel{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.panel::before,.panel::after{content:'';position:absolute;width:16px;height:16px;pointer-events:none;border-color:var(--line-hot);border-style:solid;border-width:0}
+.panel::before{top:-1px;left:-1px;border-top-width:1px;border-left-width:1px}
+.panel::after{bottom:-1px;right:-1px;border-bottom-width:1px;border-right-width:1px}
+
+.label{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--faint)}
+.rule{height:1px;background:linear-gradient(90deg,var(--line-mid),transparent);border:0;margin:0}
+.led{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:pulse 2.4s var(--ease) infinite}
+.led.amber{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.led.dim{background:var(--faint);box-shadow:none;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.32}}
+
+.btn{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;
+  padding:.72rem 1.35rem;border-radius:var(--r);border:1px solid var(--line-mid);
+  background:linear-gradient(180deg,rgba(79,209,224,.14),rgba(79,209,224,.05));color:var(--cyan);transition:all .18s var(--ease);position:relative}
+.btn:hover:not(:disabled){border-color:var(--line-hot);background:linear-gradient(180deg,rgba(79,209,224,.24),rgba(79,209,224,.09));color:var(--text-bright);box-shadow:0 0 20px -6px rgba(79,209,224,.55)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--dim)}
+.btn.ghost:hover{border-color:var(--line-mid);color:var(--text);box-shadow:none;background:rgba(79,209,224,.05)}
+.btn.sm{padding:.44rem .85rem;font-size:.63rem;letter-spacing:.15em}
+.btn.block{width:100%;display:block}
+.btn.gold{color:var(--amber);border-color:rgba(245,165,36,.35);background:rgba(245,165,36,.08)}
+.btn.gold:hover{border-color:rgba(245,165,36,.65);color:#ffe3ad;box-shadow:0 0 20px -6px rgba(245,165,36,.5)}
+.btn.danger{color:var(--rose);border-color:rgba(251,113,133,.3);background:rgba(251,113,133,.07)}
+.btn.danger:hover{border-color:rgba(251,113,133,.6);color:#ffd7dd;box-shadow:0 0 20px -6px rgba(251,113,133,.5)}
+
+.field{display:block;margin-bottom:1.15rem}
+.field > .label{display:block;margin-bottom:.5rem}
+.input,textarea.input{width:100%;font-family:var(--font-ui);font-size:.95rem;padding:.8rem .95rem;color:var(--text-bright);
+  background:rgba(4,8,16,.7);border:1px solid var(--line);border-radius:var(--r);transition:border-color .18s var(--ease),box-shadow .18s var(--ease)}
+.input::placeholder{color:var(--faint)}
+.input:focus{outline:none;border-color:var(--line-hot);box-shadow:0 0 0 3px rgba(79,209,224,.10),0 0 22px -8px rgba(79,209,224,.7)}
+textarea.input{resize:vertical;font-family:inherit;line-height:1.6}
+
+.err{font-size:.82rem;color:#ffc2cb;background:rgba(251,113,133,.09);border:1px solid rgba(251,113,133,.28);border-left-width:2px;border-radius:var(--r);padding:.6rem .8rem;margin-bottom:1rem}
+
+#authGate{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:var(--void);color:var(--dim);font-family:var(--font-mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase}
+
+#app{position:relative;z-index:2;min-height:100dvh;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:1.25rem;padding:.85rem clamp(1rem,4vw,2.5rem);
+  background:rgba(5,9,18,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
+.mark{display:flex;align-items:center;gap:.7rem;text-decoration:none;color:inherit}
+.mark svg{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 8px rgba(79,209,224,.4))}
+.mark-text{min-width:0;line-height:1.25}
+.mark-name{font-size:.84rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-bright)}
+.mark-sub{font-family:var(--font-mono);font-size:.53rem;letter-spacing:.26em;color:var(--cyan);text-transform:uppercase;margin-top:.15rem}
+.topbar-spacer{flex:1}
+.userchip{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.08em;color:var(--dim)}
+.userchip b{color:var(--cyan);font-weight:600}
+
+main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3rem) clamp(1rem,4vw,2.5rem) 3.5rem}
+
+.hero{margin-bottom:2rem}
+.hero h1{font-size:clamp(1.6rem,4vw,2.3rem);font-weight:600;letter-spacing:-.015em;line-height:1.15;margin:.6rem 0 .4rem;color:var(--text-bright)}
+.hero h1 .accent{background:linear-gradient(96deg,var(--cyan),var(--green));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{margin:0;max-width:60ch;color:var(--dim);font-size:.95rem}
+
+.sec-head{display:flex;align-items:baseline;gap:1rem;margin:0 0 1.1rem}
+.sec-head h2{font-size:.88rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--text-bright);margin:0}
+.sec-head .rule{flex:1;align-self:center}
+
+.screen{display:none}
+.screen.active{display:block;animation:screenIn .3s var(--ease)}
+@keyframes screenIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* assignment list */
+.assign-list{display:flex;flex-direction:column;gap:.85rem}
+.assign-card{padding:1.2rem 1.3rem}
+.assign-top{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.assign-title{font-size:1.02rem;font-weight:600;color:var(--text-bright);margin:0 0 .3rem}
+.assign-prompt{color:var(--dim);font-size:.85rem;line-height:1.5;max-width:64ch}
+.chip{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.16em;text-transform:uppercase;padding:.28rem .6rem;border-radius:2px;white-space:nowrap;border:1px solid currentColor}
+.chip.not_started{color:var(--faint)}
+.chip.draft{color:var(--amber)}
+.chip.grading{color:var(--violet)}
+.chip.graded{color:var(--green)}
+.roster{margin-top:.9rem;padding-top:.9rem;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:.5rem}
+.roster-row{display:flex;align-items:center;gap:.7rem;font-size:.85rem;padding:.35rem 0;border-radius:var(--r)}
+.roster-row.clickable{cursor:pointer}
+.roster-row.clickable:hover{background:rgba(79,209,224,.06)}
+.roster-row .nm{flex:1;color:var(--text-bright)}
+.roster-row .sc{font-family:var(--font-mono);font-size:.72rem;color:var(--dim)}
+.roster-row .sc b{color:var(--cyan)}
+.empty{padding:2.5rem 1.5rem;text-align:center;border:1px dashed var(--line-mid);border-radius:var(--r);color:var(--dim);font-size:.88rem}
+
+/* writing workspace */
+.prompt-box{padding:1.3rem 1.4rem;margin-bottom:1.4rem}
+.prompt-box h2{font-size:1.15rem;color:var(--text-bright);margin:.4rem 0 .7rem}
+.prompt-box .txt{color:var(--text);font-size:.94rem;line-height:1.65;white-space:pre-wrap}
+.prompt-box .len{margin-top:.8rem;font-size:.8rem;color:var(--dim)}
+.prompt-box .len b{color:var(--amber)}
+#draftText{min-height:46vh;font-size:1rem;line-height:1.7}
+.write-foot{display:flex;align-items:center;gap:1rem;margin-top:.9rem;flex-wrap:wrap}
+.wordcount{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.08em;color:var(--faint)}
+.savestate{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.1em;color:var(--faint)}
+
+/* results */
+.score-hero{padding:1.6rem 1.8rem;display:flex;align-items:center;gap:1.6rem;flex-wrap:wrap;margin-bottom:1.6rem}
+.score-num{font-size:3rem;font-weight:700;color:var(--cyan);line-height:1;text-shadow:0 0 24px rgba(79,209,224,.4)}
+.score-meta{min-width:0}
+.score-meta .lbl{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);margin-bottom:.3rem}
+.score-meta .msg{color:var(--text);font-size:.92rem;max-width:52ch}
+.score-real{margin-left:auto;text-align:right;font-family:var(--font-mono);font-size:.72rem;color:var(--dim)}
+.score-real b{display:block;font-size:1.3rem;color:var(--violet);font-family:var(--font-ui)}
+
+.rubric-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.8rem;margin-bottom:1.8rem}
+.rubric-card{padding:1rem 1.1rem}
+.rubric-card .rt{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+.rubric-card .rn{font-size:.85rem;font-weight:600;color:var(--text-bright)}
+.rubric-card .rs{font-family:var(--font-mono);font-size:.85rem;color:var(--cyan)}
+.rubric-card .rd{font-size:.8rem;color:var(--dim);line-height:1.5}
+
+.strengths{padding:1.1rem 1.3rem;margin-bottom:1.8rem;border-left:2px solid var(--green)}
+.strengths h3{margin:.2rem 0 .6rem;font-size:.85rem;color:var(--green);letter-spacing:.05em}
+.strengths ul{margin:0;padding-left:1.1rem;color:var(--text);font-size:.88rem;line-height:1.7}
+
+.narrative{padding:1.2rem 1.3rem;margin-bottom:1.8rem;white-space:pre-wrap;font-size:.92rem;line-height:1.7;color:var(--text)}
+
+.sentence-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:2rem}
+.sentence-item{padding:.7rem .9rem;border-radius:var(--r);border:1px solid var(--line);background:var(--panel-solid)}
+.sentence-item.clean{border-color:rgba(52,211,153,.2)}
+.sentence-item.has-major{border-color:rgba(251,113,133,.4)}
+.sentence-item.has-moderate{border-color:rgba(245,165,36,.4)}
+.sentence-text{font-size:.92rem;color:var(--text);line-height:1.6}
+.sentence-issues{margin-top:.5rem;display:flex;flex-direction:column;gap:.35rem}
+.issue-note{font-size:.78rem;line-height:1.5;padding:.4rem .6rem;border-radius:3px;border-left:2px solid var(--faint);background:rgba(255,255,255,.03)}
+.issue-note.sev-minor{border-left-color:var(--cyan);color:var(--dim)}
+.issue-note.sev-moderate{border-left-color:var(--amber);color:var(--text)}
+.issue-note.sev-major{border-left-color:var(--rose);color:var(--text)}
+.issue-note b{text-transform:capitalize;color:var(--text-bright)}
+.issue-note .fix{color:var(--green)}
+.sentence-clean-mark{font-size:.7rem;color:var(--green);margin-top:.3rem}
+
+/* coaching */
+.coach-banner{padding:1.1rem 1.3rem;margin-bottom:1.2rem;border-left:2px solid var(--violet)}
+.coach-banner.done{border-left-color:var(--green)}
+.coach-issue{padding:1.1rem 1.3rem;margin-bottom:.9rem}
+.coach-top{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.5rem}
+.coach-top .ct{font-size:.92rem;font-weight:600;color:var(--text-bright);text-transform:capitalize}
+.coach-desc{font-size:.85rem;color:var(--dim);line-height:1.5;margin-bottom:.6rem}
+.coach-quote{font-size:.82rem;font-style:italic;color:var(--faint);margin-bottom:.6rem}
+.coach-note{font-size:.82rem;color:var(--cyan);margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--line)}
+#practiceText{min-height:36vh;font-size:.95rem;line-height:1.7;margin:1rem 0}
+
+/* modal (reused pattern) */
+.modal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:1.5rem;background:rgba(2,4,9,.82);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.modal.show{display:flex}
+.modal .panel{width:100%;max-width:560px;padding:2rem 1.9rem 1.7rem;max-height:88dvh;overflow-y:auto}
+.modal h2{margin:.5rem 0 .4rem;font-size:1.15rem;font-weight:600;color:var(--text-bright)}
+.modal .sub{margin:0 0 1.4rem;font-size:.87rem;color:var(--dim)}
+.modal-actions{display:flex;gap:.65rem;margin-top:1.5rem}
+.modal-actions .btn{flex:1}
+.student-picker{display:flex;flex-direction:column;gap:.5rem}
+.pick-row{display:flex;align-items:center;gap:.6rem;padding:.6rem .8rem;border:1px solid var(--line);border-radius:var(--r);cursor:pointer}
+.pick-row:hover{border-color:var(--line-mid)}
+.pick-row input{width:16px;height:16px;accent-color:var(--cyan)}
+
+#toast{position:fixed;left:50%;bottom:2rem;transform:translate(-50%,120%);z-index:90;max-width:min(90vw,420px);padding:.8rem 1.15rem;font-size:.86rem;
+  background:var(--panel-solid);border:1px solid var(--line-mid);border-left:2px solid var(--cyan);border-radius:var(--r);box-shadow:0 18px 50px -18px rgba(0,0,0,.95);transition:transform .3s var(--ease)}
+#toast.show{transform:translate(-50%,0)}
+#toast.bad{border-left-color:var(--rose)}
+
+@media (max-width:560px){
+  .topbar{gap:.6rem;padding:.7rem 1rem}
+  .mark-text{display:none}
+  .score-hero{flex-direction:column;align-items:flex-start}
+  .score-real{margin-left:0;text-align:left}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+</style>
+</head>
+<body>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+<div class="ambient" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<div id="authGate">Verifying clearance…</div>
+
+<div id="app" style="display:none">
+  <header class="topbar">
+    <a class="mark" href="index.html">
+      <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M24 3 L44 43 L24 34 L4 43 Z" fill="url(#gtop)"/>
+        <path d="M24 12 L36 38 L24 32 L12 38 Z" fill="#04070f"/>
+        <circle cx="24" cy="27" r="3.2" fill="#34d399"/>
+        <defs><linearGradient id="gtop" x1="4" y1="3" x2="44" y2="43">
+          <stop stop-color="#4fd1e0"/><stop offset="1" stop-color="#34d399"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="mark-text"><span class="mark-name">Cluff Learning</span><span class="mark-sub">Back to Bridge</span></span>
+    </a>
+    <div class="topbar-spacer"></div>
+    <span class="userchip">Signed in as <b id="userChipName">—</b></span>
+    <button id="btnNewAssignment" class="btn sm" hidden>+ New Assignment</button>
+    <button id="btnSignOut" class="btn ghost sm">Sign out</button>
+  </header>
+
+  <main>
+    <!-- ── LIST ── -->
+    <section id="screen-list" class="screen active">
+      <div class="hero">
+        <div class="label"><i class="led"></i> Essay Coach</div>
+        <h1><span class="accent">Writing</span> assignments</h1>
+        <p id="heroSub">Loading…</p>
+      </div>
+      <div id="assignList" class="assign-list"></div>
+    </section>
+
+    <!-- ── WRITE ── -->
+    <section id="screen-write" class="screen">
+      <button class="btn ghost sm" id="btnBackToList1" style="margin-bottom:1.2rem">← Back to assignments</button>
+      <div class="panel prompt-box">
+        <div class="label">Prompt</div>
+        <h2 id="writeTitle">—</h2>
+        <div class="txt" id="writePrompt"></div>
+        <div class="len" id="writeLen"></div>
+      </div>
+      <textarea id="draftText" class="input" placeholder="Write your essay here…" spellcheck="true"></textarea>
+      <div class="write-foot">
+        <span class="wordcount" id="wordCount">0 words</span>
+        <span class="savestate" id="saveState"></span>
+        <div style="flex:1"></div>
+        <button id="btnGrade" class="btn gold">Grade This Essay</button>
+      </div>
+    </section>
+
+    <!-- ── RESULTS ── -->
+    <section id="screen-results" class="screen">
+      <button class="btn ghost sm" id="btnBackToList2" style="margin-bottom:1.2rem">← Back to assignments</button>
+
+      <div class="panel score-hero">
+        <div class="score-num" id="scoreNum">—</div>
+        <div class="score-meta">
+          <div class="lbl">Your Score</div>
+          <div class="msg" id="scoreMsg"></div>
+        </div>
+        <div class="score-real" id="scoreReal" hidden></div>
+      </div>
+
+      <div id="strengthsBlock"></div>
+
+      <div class="sec-head"><h2>Rubric</h2><div class="rule"></div></div>
+      <div class="rubric-grid" id="rubricGrid"></div>
+
+      <div class="sec-head"><h2>Overall Feedback</h2><div class="rule"></div></div>
+      <div class="panel narrative" id="overallFeedback"></div>
+
+      <div class="sec-head"><h2>Sentence by Sentence</h2><div class="rule"></div></div>
+      <div class="sentence-list" id="sentenceList"></div>
+
+      <div id="coachSection"></div>
+    </section>
+  </main>
+</div>
+
+<!-- ── New Assignment modal (parent) ── -->
+<div id="assignModal" class="modal">
+  <div class="panel">
+    <div class="label">Essay Coach</div>
+    <h2>New assignment</h2>
+    <p class="sub">Set a prompt, a rough length target, and who it's for. Length is graded reasonably, not enforced strictly.</p>
+    <div id="errAssign" class="err" hidden></div>
+    <label class="field">
+      <span class="label">Title</span>
+      <input id="aTitle" class="input" type="text" placeholder="The Case for..." maxlength="120">
+    </label>
+    <label class="field">
+      <span class="label">Prompt / instructions</span>
+      <textarea id="aPrompt" class="input" rows="5" placeholder="Write a persuasive essay arguing..."></textarea>
+    </label>
+    <label class="field">
+      <span class="label">Length guidance (optional)</span>
+      <input id="aLength" class="input" type="text" placeholder="e.g. 4-6 paragraphs, or roughly 800 words" maxlength="300">
+    </label>
+    <div class="field">
+      <span class="label">Assign to</span>
+      <div class="student-picker" id="studentPicker"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="cancelAssign" class="btn ghost">Cancel</button>
+      <button id="saveAssign" class="btn gold">Create assignment</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Grade confirmation modal ── -->
+<div id="gradeModal" class="modal">
+  <div class="panel">
+    <div class="label">Final Submission</div>
+    <h2>Ready to be graded?</h2>
+    <p class="sub">Once you submit, this exact essay is what gets scored — you can't edit it afterward. Take a last look before you confirm.</p>
+    <div class="modal-actions">
+      <button id="cancelGrade" class="btn ghost">Keep writing</button>
+      <button id="confirmGrade" class="btn gold">Yes, grade it</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   CONFIG + API
+══════════════════════════════════════════════════════════════ */
+const API_URL='https://cluff-learning-api.kylecluff.workers.dev';
+const TOKEN_KEY='cls_jwt';
+let ME=null;
+let familyMembers=[];
+let currentAssignment=null; // {id, title, prompt, length_guidance}
+let saveDraftTimer=null;
+let savePracticeTimer=null;
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(method,path,body){
+  const opts={ method, headers:{ 'Content-Type':'application/json' } };
+  const token=localStorage.getItem(TOKEN_KEY);
+  if(token) opts.headers['Authorization']='Bearer '+token;
+  if(body!==undefined) opts.body=JSON.stringify(body);
+  try{
+    const res=await fetch(API_URL+path,opts);
+    const text=await res.text();
+    let data={};
+    try{ data=text?JSON.parse(text):{}; }catch(e){ data={ error:text||('HTTP '+res.status) }; }
+    if(!res.ok) return { error:data.error||('HTTP '+res.status), status:res.status };
+    return data;
+  }catch(e){ return { error:e.message||'Network error' }; }
+}
+
+let toastTimer;
+function toast(msg,bad){
+  const el=$('toast'); el.textContent=msg; el.classList.toggle('bad',!!bad); el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),3600);
+}
+function openModal(id){ $(id).classList.add('show'); }
+function closeModal(id){ $(id).classList.remove('show'); }
+
+/* ══════════════════════════════════════════════════════════════
+   Starfield (matches the homepage)
+══════════════════════════════════════════════════════════════ */
+(function starfield(){
+  const canvas=$('starfield'); const ctx=canvas.getContext('2d');
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let stars=[], w=0, h=0, dpr=1;
+  function resize(){
+    dpr=Math.min(devicePixelRatio||1,2); w=innerWidth; h=innerHeight;
+    if(!w||!h){ stars=[]; return; }
+    canvas.width=w*dpr; canvas.height=h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    const count=Math.round((w*h)/13000);
+    stars=Array.from({length:count},()=>({ x:Math.random()*w,y:Math.random()*h,r:Math.random()*1.1+.25,
+      a:Math.random()*.5+.12,v:Math.random()*.02+.004,p:Math.random()*Math.PI*2 }));
+  }
+  function draw(t){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      const tw=reduce?1:.68+.32*Math.sin(t/900+s.p);
+      ctx.globalAlpha=s.a*tw; ctx.fillStyle=s.r>1.0?'#9fe8d2':'#dce8f6';
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+      if(!reduce){ s.y-=s.v; if(s.y<-2){ s.y=h+2; s.x=Math.random()*w; } }
+    }
+    ctx.globalAlpha=1; requestAnimationFrame(draw);
+  }
+  addEventListener('resize',resize,{passive:true}); resize(); requestAnimationFrame(draw);
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   Boot / auth
+══════════════════════════════════════════════════════════════ */
+async function boot(){
+  const token=localStorage.getItem(TOKEN_KEY);
+  if(!token){ location.href='index.html'; return; }
+  const me=await api('GET','/auth/me');
+  if(me.error||!me.user){ localStorage.removeItem(TOKEN_KEY); location.href='index.html'; return; }
+  ME=me.user;
+  if(!ME.family){ location.href='index.html'; return; }
+  $('userChipName').textContent=ME.display_name||ME.email;
+  if(ME.role==='parent'){
+    $('btnNewAssignment').hidden=false;
+    const fam=await api('GET','/family');
+    familyMembers=(fam.family&&fam.family.members)||[];
+  }
+  $('authGate').style.display='none';
+  $('app').style.display='';
+  await loadAssignments();
+}
+$('btnSignOut').onclick=async()=>{ await api('POST','/auth/logout'); localStorage.removeItem(TOKEN_KEY); location.href='index.html'; };
+
+const screens={ list:$('screen-list'), write:$('screen-write'), results:$('screen-results') };
+function show(n){ Object.values(screens).forEach(s=>s.classList.remove('active')); screens[n].classList.add('active'); window.scrollTo(0,0); }
+$('btnBackToList1').onclick=()=>{ flushDraftSave(); show('list'); loadAssignments(); };
+$('btnBackToList2').onclick=()=>{ show('list'); loadAssignments(); };
+
+/* ══════════════════════════════════════════════════════════════
+   Assignment list
+══════════════════════════════════════════════════════════════ */
+const STATUS_LABEL={ not_started:'Not started', draft:'In progress', grading:'Grading…', graded:'Graded' };
+
+async function loadAssignments(){
+  const r=await api('GET','/essays/assignments');
+  if(r.error){ $('assignList').innerHTML=`<div class="empty">${esc(r.error)}</div>`; return; }
+  const isParent=r.role==='parent';
+  $('heroSub').textContent=isParent
+    ? 'Prompts you’ve set for your kids, and how each of them is doing.'
+    : 'Pick an assignment below to start writing, or review one you’ve already turned in.';
+
+  const list=$('assignList');
+  const items=r.assignments||[];
+  if(!items.length){
+    list.innerHTML=`<div class="empty">${isParent?'No assignments yet — create one to get started.':'Nothing assigned yet. Check back soon.'}</div>`;
+    return;
+  }
+
+  if(isParent){
+    list.innerHTML=items.map(a=>{
+      const rows=(a.targets||[]).map(t=>{
+        const graded=t.status==='graded';
+        const scores=graded?`<span class="sc">Real <b>${t.score_total}</b> · Shown <b>${t.adaptive_score}</b></span>`:'';
+        return `<div class="roster-row ${graded?'clickable':''}" ${graded?`data-view="${a.id}:${t.user_id}"`:''}>
+          <span class="nm">${esc(t.display_name||t.email)}</span>
+          <span class="chip ${t.status}">${esc(STATUS_LABEL[t.status]||t.status)}</span>
+          ${scores}
+        </div>`;
+      }).join('');
+      return `<article class="panel assign-card">
+        <div class="assign-top">
+          <div><h3 class="assign-title">${esc(a.title)}</h3><div class="assign-prompt">${esc(a.prompt)}</div></div>
+        </div>
+        <div class="roster">${rows}</div>
+      </article>`;
+    }).join('');
+    list.querySelectorAll('[data-view]').forEach(el=>{
+      el.addEventListener('click',()=>{
+        const [assignmentId,studentId]=el.dataset.view.split(':');
+        openResults(assignmentId,studentId);
+      });
+    });
+    return;
+  }
+
+  list.innerHTML=items.map(a=>`
+    <article class="panel assign-card" data-open="${a.id}" style="cursor:pointer">
+      <div class="assign-top">
+        <div><h3 class="assign-title">${esc(a.title)}</h3><div class="assign-prompt">${esc(a.prompt)}</div></div>
+        <span class="chip ${a.status}">${esc(STATUS_LABEL[a.status]||a.status)}</span>
+      </div>
+    </article>`).join('');
+  list.querySelectorAll('[data-open]').forEach(el=>{
+    el.addEventListener('click',async()=>{
+      const id=el.dataset.open;
+      const item=items.find(a=>a.id===id);
+      if(item.status==='graded') openResults(id,ME.id);
+      else openWrite(id);
+    });
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Writing workspace
+══════════════════════════════════════════════════════════════ */
+function updateWordCount(){
+  const words=($('draftText').value.trim().match(/\S+/g)||[]).length;
+  $('wordCount').textContent=words+' word'+(words===1?'':'s');
+}
+function flushDraftSave(){
+  if(!currentAssignment) return;
+  clearTimeout(saveDraftTimer);
+  saveDraft();
+}
+async function saveDraft(){
+  if(!currentAssignment) return;
+  $('saveState').textContent='Saving…';
+  const r=await api('PUT',`/essays/assignments/${currentAssignment.id}/essay/draft`,{ draft_text:$('draftText').value });
+  $('saveState').textContent=r.error?'Not saved':'Saved';
+}
+$('draftText').addEventListener('input',()=>{
+  updateWordCount();
+  $('saveState').textContent='Typing…';
+  clearTimeout(saveDraftTimer);
+  saveDraftTimer=setTimeout(saveDraft,1000);
+});
+
+async function openWrite(assignmentId){
+  const r=await api('GET',`/essays/assignments/${assignmentId}/essay`);
+  if(r.error){ toast(r.error,true); return; }
+  currentAssignment=r.assignment;
+  $('writeTitle').textContent=r.assignment.title;
+  $('writePrompt').textContent=r.assignment.prompt;
+  $('writeLen').innerHTML=r.assignment.length_guidance?`Length guidance: <b>${esc(r.assignment.length_guidance)}</b>`:'';
+  $('draftText').value=r.essay.draft_text||'';
+  $('saveState').textContent=r.essay.draft_text?'Saved':'';
+  updateWordCount();
+  show('write');
+  $('draftText').focus();
+}
+
+$('btnGrade').onclick=()=>{
+  if(!$('draftText').value.trim()){ toast('Write something before grading.',true); return; }
+  openModal('gradeModal');
+};
+$('cancelGrade').onclick=()=>closeModal('gradeModal');
+$('confirmGrade').onclick=async()=>{
+  closeModal('gradeModal');
+  flushDraftSave();
+  const btn=$('btnGrade');
+  btn.disabled=true; btn.textContent='Grading… this can take a moment';
+  const r=await api('POST',`/essays/assignments/${currentAssignment.id}/essay/grade`);
+  btn.disabled=false; btn.textContent='Grade This Essay';
+  if(r.error){ toast(r.error,true); return; }
+  await openResults(currentAssignment.id,ME.id);
+};
+
+/* ══════════════════════════════════════════════════════════════
+   Results + coaching
+══════════════════════════════════════════════════════════════ */
+const RUBRIC_LABELS={ mechanics:'Mechanics', word_choice:'Word Choice & Voice', organization:'Organization & Flow',
+  argument:'Argument Quality', persuasion:'Persuasiveness & Rhetoric', polish:'Overall Polish' };
+const RUBRIC_MAX={ mechanics:20, word_choice:15, organization:15, argument:25, persuasion:15, polish:10 };
+
+let currentResults=null; // { assignmentId, studentId, isParent }
+
+async function openResults(assignmentId,studentId){
+  const r=await api('GET',`/essays/assignments/${assignmentId}/essay/${studentId}/results`);
+  if(r.error){ toast(r.error,true); return; }
+  const isParent='score_total' in r;
+  currentResults={ assignmentId, studentId, isParent };
+
+  $('scoreNum').textContent=r.adaptive_score;
+  $('scoreMsg').textContent=isParent
+    ? `${esc(r.student.display_name||r.student.email)}’s adaptive (student-facing) score.`
+    : 'Keep this up and it only goes up from here.';
+  if(isParent){
+    $('scoreReal').hidden=false;
+    $('scoreReal').innerHTML=`Real score<b>${r.score_total}/100</b>`;
+  } else {
+    $('scoreReal').hidden=true;
+  }
+
+  const f=r.feedback||{};
+  $('strengthsBlock').innerHTML=(f.strengths&&f.strengths.length)
+    ? `<div class="panel strengths"><h3>What’s working</h3><ul>${f.strengths.map(s=>`<li>${esc(s)}</li>`).join('')}</ul></div>` : '';
+
+  const rubric=f.rubric||{};
+  $('rubricGrid').innerHTML=Object.keys(RUBRIC_LABELS).map(k=>{
+    const c=rubric[k]||{};
+    const scoreHtml=(isParent&&c.score!=null)?`<span class="rs">${c.score}/${RUBRIC_MAX[k]}</span>`:'';
+    return `<div class="panel rubric-card"><div class="rt"><span class="rn">${RUBRIC_LABELS[k]}</span>${scoreHtml}</div><div class="rd">${esc(c.notes||'')}</div></div>`;
+  }).join('');
+
+  $('overallFeedback').textContent=f.overall_feedback||'';
+  if(f.length_assessment) $('overallFeedback').textContent+='\n\n'+f.length_assessment;
+
+  $('sentenceList').innerHTML=(f.sentences||[]).map(s=>{
+    const issues=s.issues||[];
+    const maxSev=issues.reduce((m,i)=>{ const rank={minor:1,moderate:2,major:3}; return Math.max(m,rank[i.severity]||1); },0);
+    const cls=maxSev===3?'has-major':maxSev===2?'has-moderate':(issues.length?'':'clean');
+    const issuesHtml=issues.length
+      ? `<div class="sentence-issues">${issues.map(i=>`<div class="issue-note sev-${esc(i.severity||'minor')}"><b>${esc((i.type||'').replace(/_/g,' '))}</b> — ${esc(i.note||'')}${i.suggestion?` <span class="fix">→ ${esc(i.suggestion)}</span>`:''}</div>`).join('')}</div>`
+      : `<div class="sentence-clean-mark">✓ clean</div>`;
+    return `<div class="sentence-item ${cls}"><div class="sentence-text">${esc(s.text)}</div>${issuesHtml}</div>`;
+  }).join('') || '<div class="empty">No sentence feedback returned.</div>';
+
+  renderCoaching(r.coaching, isParent);
+  show('results');
+}
+
+function renderCoaching(coaching,isParent){
+  const box=$('coachSection');
+  if(!coaching || !coaching.issues || !coaching.issues.length){ box.innerHTML=''; return; }
+
+  if(isParent){
+    const done=coaching.completed;
+    box.innerHTML=`<div class="sec-head"><h2>Coaching Progress</h2><div class="rule"></div></div>
+      <div class="panel coach-banner ${done?'done':''}">${done?'✓ All 5 issues addressed during practice.':'Still working through the top 5 issues.'}</div>`;
+    return;
+  }
+
+  const done=coaching.completed;
+  let html=`<div class="sec-head"><h2>Practice: Fix Your Top 5</h2><div class="rule"></div></div>
+    <div class="panel coach-banner ${done?'done':''}">${done
+      ? '✓ Nice work — you’ve addressed all 5. This practice doesn’t change your recorded grade, but it’s exactly the kind of revising that shows up in your next essay.'
+      : 'This won’t change your recorded grade for this essay — it’s practice for next time. Revise the text below, then check each fix.'}</div>`;
+
+  coaching.issues.forEach((issue,idx)=>{
+    const statusChip = issue.status==='resolved' ? '<span class="chip graded">Resolved</span>'
+      : issue.status==='partial' ? '<span class="chip draft">Good effort</span>'
+      : issue.status==='accepted' ? '<span class="chip not_started">Moved on</span>'
+      : '<span class="chip grading">Needs work</span>';
+    html+=`<div class="panel coach-issue">
+      <div class="coach-top"><span class="ct">${esc((issue.issue_type||'').replace(/_/g,' '))}</span>${statusChip}</div>
+      <div class="coach-desc">${esc(issue.description||'')}</div>
+      ${issue.quote?`<div class="coach-quote">"${esc(issue.quote)}"</div>`:''}
+      ${issue.status==='open'?`<button class="btn sm" data-check="${idx}">Check This Fix</button>`:''}
+      ${issue.last_note?`<div class="coach-note">${esc(issue.last_note)}</div>`:''}
+    </div>`;
+  });
+
+  html+=`<div class="sec-head"><h2>Your Practice Draft</h2><div class="rule"></div></div>
+    <textarea id="practiceText" class="input">${esc(coaching.practice_text||'')}</textarea>
+    <div class="savestate" id="practiceSaveState"></div>`;
+
+  box.innerHTML=html;
+
+  $('practiceText').addEventListener('input',()=>{
+    $('practiceSaveState').textContent='Typing…';
+    clearTimeout(savePracticeTimer);
+    savePracticeTimer=setTimeout(savePractice,1000);
+  });
+
+  box.querySelectorAll('[data-check]').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      clearTimeout(savePracticeTimer);
+      await savePractice();
+      btn.disabled=true; btn.textContent='Checking…';
+      const idx=btn.dataset.check;
+      const r=await api('POST',`/essays/assignments/${currentResults.assignmentId}/essay/coaching/check`,{ issue_index:Number(idx) });
+      if(r.error){ toast(r.error,true); btn.disabled=false; btn.textContent='Check This Fix'; return; }
+      renderCoaching(r.coaching,false);
+    });
+  });
+}
+
+async function savePractice(){
+  if(!currentResults) return;
+  const el=$('practiceText'); if(!el) return;
+  $('practiceSaveState').textContent='Saving…';
+  const r=await api('PUT',`/essays/assignments/${currentResults.assignmentId}/essay/practice`,{ practice_text:el.value });
+  const st=$('practiceSaveState'); if(st) st.textContent=r.error?'Not saved':'Saved';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   New assignment (parent)
+══════════════════════════════════════════════════════════════ */
+$('btnNewAssignment').onclick=()=>{
+  $('aTitle').value=''; $('aPrompt').value=''; $('aLength').value='';
+  $('errAssign').hidden=true;
+  $('studentPicker').innerHTML=familyMembers.map(m=>`
+    <label class="pick-row"><input type="checkbox" value="${m.id}"><span>${esc(m.display_name||m.email)} <span class="label">${m.role}</span></span></label>
+  `).join('') || '<div class="empty">No family members yet.</div>';
+  openModal('assignModal');
+  $('aTitle').focus();
+};
+$('cancelAssign').onclick=()=>closeModal('assignModal');
+$('saveAssign').onclick=async()=>{
+  const title=$('aTitle').value.trim();
+  const prompt=$('aPrompt').value.trim();
+  const length_guidance=$('aLength').value.trim();
+  const student_ids=[...document.querySelectorAll('#studentPicker input:checked')].map(i=>i.value);
+  const showErr=m=>{ $('errAssign').textContent=m; $('errAssign').hidden=false; };
+  $('errAssign').hidden=true;
+  if(!title||!prompt){ showErr('Title and prompt are required.'); return; }
+  if(!student_ids.length){ showErr('Pick at least one student.'); return; }
+  const r=await api('POST','/essays/assignments',{ title, prompt, length_guidance, student_ids });
+  if(r.error){ showErr(r.error); return; }
+  closeModal('assignModal');
+  toast('Assignment created.');
+  await loadAssignments();
+};
+
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeModal('assignModal'); closeModal('gradeModal'); } });
+
+boot();
+</script>
+</body>
+</html>

@@ -11,4 +11,5 @@ required = [
   "RESEND_API_KEY",    # Resend API key
   "RESEND_FROM",       # e.g. "Cluff Learning <no-reply@yourdomain.com>"
   "BOOTSTRAP_EMAILS",  # comma-separated admin emails allowed to self-register
+  "ANTHROPIC_API_KEY", # for the essay grader's calls to Claude
 ]
