@@ -293,7 +293,7 @@ main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3
 <div id="assignModal" class="modal">
   <div class="panel">
     <div class="label">Essay Coach</div>
-    <h2>New assignment</h2>
+    <h2 id="assignModalTitle">New assignment</h2>
     <p class="sub">Set a prompt, a rough length target, and who it's for. Length is graded reasonably, not enforced strictly.</p>
     <div id="errAssign" class="err" hidden></div>
     <label class="field">
@@ -432,16 +432,19 @@ $('btnBackToList2').onclick=()=>{ show('list'); loadAssignments(); };
 ══════════════════════════════════════════════════════════════ */
 const STATUS_LABEL={ not_started:'Not started', draft:'In progress', grading:'Grading…', graded:'Graded' };
 
+let lastAssignments=[];
+
 async function loadAssignments(){
   const r=await api('GET','/essays/assignments');
   if(r.error){ $('assignList').innerHTML=`<div class="empty">${esc(r.error)}</div>`; return; }
   const isParent=r.role==='parent';
   $('heroSub').textContent=isParent
-    ? 'Prompts you’ve set for your kids, and how each of them is doing.'
+    ? 'Prompts you’ve set for your kids, and how each of them is doing. You can write your own too — just add yourself when creating or editing an assignment.'
     : 'Pick an assignment below to start writing, or review one you’ve already turned in.';
 
   const list=$('assignList');
   const items=r.assignments||[];
+  lastAssignments=items;
   if(!items.length){
     list.innerHTML=`<div class="empty">${isParent?'No assignments yet — create one to get started.':'Nothing assigned yet. Check back soon.'}</div>`;
     return;
@@ -450,10 +453,12 @@ async function loadAssignments(){
   if(isParent){
     list.innerHTML=items.map(a=>{
       const rows=(a.targets||[]).map(t=>{
+        const isMe=t.user_id===ME.id;
         const graded=t.status==='graded';
+        const clickable=isMe||graded;
         const scores=graded?`<span class="sc">Real <b>${t.score_total}</b> · Shown <b>${t.adaptive_score}</b></span>`:'';
-        return `<div class="roster-row ${graded?'clickable':''}" ${graded?`data-view="${a.id}:${t.user_id}"`:''}>
-          <span class="nm">${esc(t.display_name||t.email)}</span>
+        return `<div class="roster-row ${clickable?'clickable':''}" ${clickable?`data-view="${a.id}:${t.user_id}"`:''}>
+          <span class="nm">${esc(t.display_name||t.email)}${isMe?' <span class="label">(you)</span>':''}</span>
           <span class="chip ${t.status}">${esc(STATUS_LABEL[t.status]||t.status)}</span>
           ${scores}
         </div>`;
@@ -461,6 +466,10 @@ async function loadAssignments(){
       return `<article class="panel assign-card">
         <div class="assign-top">
           <div><h3 class="assign-title">${esc(a.title)}</h3><div class="assign-prompt">${esc(a.prompt)}</div></div>
+          <div class="row" style="gap:.4rem">
+            <button class="btn ghost sm" data-edit="${a.id}">Edit</button>
+            <button class="btn danger sm" data-delete="${a.id}">Delete</button>
+          </div>
         </div>
         <div class="roster">${rows}</div>
       </article>`;
@@ -468,7 +477,24 @@ async function loadAssignments(){
     list.querySelectorAll('[data-view]').forEach(el=>{
       el.addEventListener('click',()=>{
         const [assignmentId,studentId]=el.dataset.view.split(':');
-        openResults(assignmentId,studentId);
+        const a=items.find(x=>x.id===assignmentId);
+        const t=(a&&a.targets||[]).find(x=>x.user_id===studentId);
+        if(t&&t.status==='graded') openResults(assignmentId,studentId);
+        else openWrite(assignmentId);
+      });
+    });
+    list.querySelectorAll('[data-edit]').forEach(el=>{
+      el.addEventListener('click',e=>{ e.stopPropagation(); openEditAssignment(el.dataset.edit); });
+    });
+    list.querySelectorAll('[data-delete]').forEach(el=>{
+      el.addEventListener('click',async e=>{
+        e.stopPropagation();
+        const a=items.find(x=>x.id===el.dataset.delete);
+        if(!confirm(`Delete "${a?a.title:'this assignment'}"? This also deletes any essays and grades written against it — this can't be undone.`)) return;
+        const r2=await api('DELETE',`/essays/assignments/${el.dataset.delete}`);
+        if(r2.error){ toast(r2.error,true); return; }
+        toast('Assignment deleted.');
+        loadAssignments();
       });
     });
     return;
@@ -558,13 +584,14 @@ let currentResults=null; // { assignmentId, studentId, isParent }
 async function openResults(assignmentId,studentId){
   const r=await api('GET',`/essays/assignments/${assignmentId}/essay/${studentId}/results`);
   if(r.error){ toast(r.error,true); return; }
-  const isParent='score_total' in r;
-  currentResults={ assignmentId, studentId, isParent };
+  const isParent='score_total' in r;   // controls whether raw numeric scores show
+  const isSelf=studentId===ME.id;      // controls whether the interactive coaching loop shows
+  currentResults={ assignmentId, studentId, isParent, isSelf };
 
   $('scoreNum').textContent=r.adaptive_score;
-  $('scoreMsg').textContent=isParent
-    ? `${esc(r.student.display_name||r.student.email)}’s adaptive (student-facing) score.`
-    : 'Keep this up and it only goes up from here.';
+  $('scoreMsg').textContent=isSelf
+    ? 'Keep this up and it only goes up from here.'
+    : `${esc(r.student.display_name||r.student.email)}’s adaptive (student-facing) score.`;
   if(isParent){
     $('scoreReal').hidden=false;
     $('scoreReal').innerHTML=`Real score<b>${r.score_total}/100</b>`;
@@ -596,15 +623,15 @@ async function openResults(assignmentId,studentId){
     return `<div class="sentence-item ${cls}"><div class="sentence-text">${esc(s.text)}</div>${issuesHtml}</div>`;
   }).join('') || '<div class="empty">No sentence feedback returned.</div>';
 
-  renderCoaching(r.coaching, isParent);
+  renderCoaching(r.coaching, isSelf);
   show('results');
 }
 
-function renderCoaching(coaching,isParent){
+function renderCoaching(coaching,isSelf){
   const box=$('coachSection');
   if(!coaching || !coaching.issues || !coaching.issues.length){ box.innerHTML=''; return; }
 
-  if(isParent){
+  if(!isSelf){
     const done=coaching.completed;
     box.innerHTML=`<div class="sec-head"><h2>Coaching Progress</h2><div class="rule"></div></div>
       <div class="panel coach-banner ${done?'done':''}">${done?'✓ All 5 issues addressed during practice.':'Still working through the top 5 issues.'}</div>`;
@@ -651,7 +678,7 @@ function renderCoaching(coaching,isParent){
       const idx=btn.dataset.check;
       const r=await api('POST',`/essays/assignments/${currentResults.assignmentId}/essay/coaching/check`,{ issue_index:Number(idx) });
       if(r.error){ toast(r.error,true); btn.disabled=false; btn.textContent='Check This Fix'; return; }
-      renderCoaching(r.coaching,false);
+      renderCoaching(r.coaching,true);
     });
   });
 }
@@ -665,17 +692,43 @@ async function savePractice(){
 }
 
 /* ══════════════════════════════════════════════════════════════
-   New assignment (parent)
+   New / edit assignment (parent) — one modal, two modes
 ══════════════════════════════════════════════════════════════ */
+let editingAssignmentId=null;
+
+function fillStudentPicker(checkedIds){
+  const checked=new Set(checkedIds||[]);
+  $('studentPicker').innerHTML=familyMembers.map(m=>`
+    <label class="pick-row"><input type="checkbox" value="${m.id}" ${checked.has(m.id)?'checked':''}><span>${esc(m.display_name||m.email)} <span class="label">${m.role}</span></span></label>
+  `).join('') || '<div class="empty">No family members yet.</div>';
+}
+
 $('btnNewAssignment').onclick=()=>{
+  editingAssignmentId=null;
+  $('assignModalTitle').textContent='New assignment';
+  $('saveAssign').textContent='Create assignment';
   $('aTitle').value=''; $('aPrompt').value=''; $('aLength').value='';
   $('errAssign').hidden=true;
-  $('studentPicker').innerHTML=familyMembers.map(m=>`
-    <label class="pick-row"><input type="checkbox" value="${m.id}"><span>${esc(m.display_name||m.email)} <span class="label">${m.role}</span></span></label>
-  `).join('') || '<div class="empty">No family members yet.</div>';
+  fillStudentPicker([]);
   openModal('assignModal');
   $('aTitle').focus();
 };
+
+function openEditAssignment(assignmentId){
+  const a=lastAssignments.find(x=>x.id===assignmentId);
+  if(!a){ toast('Could not find that assignment.',true); return; }
+  editingAssignmentId=assignmentId;
+  $('assignModalTitle').textContent='Edit assignment';
+  $('saveAssign').textContent='Save changes';
+  $('errAssign').hidden=true;
+  $('aTitle').value=a.title||'';
+  $('aPrompt').value=a.prompt||'';
+  $('aLength').value=a.length_guidance||'';
+  fillStudentPicker((a.targets||[]).map(t=>t.user_id));
+  openModal('assignModal');
+  $('aTitle').focus();
+}
+
 $('cancelAssign').onclick=()=>closeModal('assignModal');
 $('saveAssign').onclick=async()=>{
   const title=$('aTitle').value.trim();
@@ -686,10 +739,13 @@ $('saveAssign').onclick=async()=>{
   $('errAssign').hidden=true;
   if(!title||!prompt){ showErr('Title and prompt are required.'); return; }
   if(!student_ids.length){ showErr('Pick at least one student.'); return; }
-  const r=await api('POST','/essays/assignments',{ title, prompt, length_guidance, student_ids });
+
+  const r=editingAssignmentId
+    ? await api('PATCH',`/essays/assignments/${editingAssignmentId}`,{ title, prompt, length_guidance, student_ids })
+    : await api('POST','/essays/assignments',{ title, prompt, length_guidance, student_ids });
   if(r.error){ showErr(r.error); return; }
   closeModal('assignModal');
-  toast('Assignment created.');
+  toast(editingAssignmentId?'Assignment updated.':'Assignment created.');
   await loadAssignments();
 };
 

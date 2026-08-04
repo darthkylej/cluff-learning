@@ -29,6 +29,8 @@
 
      POST   /essays/assignments
      GET    /essays/assignments
+     PATCH  /essays/assignments/:id
+     DELETE /essays/assignments/:id
      GET    /essays/assignments/:id/essay
      PUT    /essays/assignments/:id/essay/draft
      POST   /essays/assignments/:id/essay/grade
@@ -895,6 +897,78 @@ async function handleCreateAssignment(request, env) {
   return json(request, { ok: true, assignment_id: assignmentId }, 201);
 }
 
+// Title/prompt/length are optional partial updates. student_ids, if given,
+// is the FULL desired roster — targets are added/removed to match, but an
+// essay a student already wrote is never touched or deleted by this, even
+// if they're removed from the roster afterward.
+async function handleUpdateAssignment(request, env, assignmentId) {
+  const gate = await requireParentSession(request, env);
+  if (gate.error) return gate.error;
+  const owns = await query(env, `SELECT id FROM essay_assignments WHERE id = $1 AND family_id = $2`,
+    [assignmentId, gate.family.id]);
+  if (!owns.rows?.length) return err(request, 'Assignment not found.', 404);
+
+  const body = await request.json();
+  const sets = []; const vals = []; let i = 1;
+  if (body.title !== undefined) {
+    const title = String(body.title).trim().slice(0, 120);
+    if (!title) return err(request, 'Title cannot be empty.');
+    sets.push(`title = $${i++}`); vals.push(title);
+  }
+  if (body.prompt !== undefined) {
+    const prompt = String(body.prompt).trim();
+    if (!prompt) return err(request, 'Prompt cannot be empty.');
+    sets.push(`prompt = $${i++}`); vals.push(prompt);
+  }
+  if (body.length_guidance !== undefined) {
+    sets.push(`length_guidance = $${i++}`); vals.push(String(body.length_guidance).trim().slice(0, 300));
+  }
+  if (sets.length) {
+    vals.push(assignmentId);
+    await query(env, `UPDATE essay_assignments SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+  }
+
+  if (Array.isArray(body.student_ids)) {
+    const studentIds = body.student_ids.filter(Boolean);
+    const members = await query(env,
+      `SELECT user_id FROM family_members WHERE family_id = $1 AND user_id = ANY($2::uuid[])`,
+      [gate.family.id, studentIds]);
+    const validIds = new Set((members.rows || []).map(r => r.user_id));
+    const nextIds = new Set(studentIds.filter(id => validIds.has(id)));
+
+    const current = await query(env, `SELECT user_id FROM essay_assignment_targets WHERE assignment_id = $1`, [assignmentId]);
+    const currentIds = new Set((current.rows || []).map(r => r.user_id));
+
+    const toRemove = [...currentIds].filter(id => !nextIds.has(id));
+    const toAdd = [...nextIds].filter(id => !currentIds.has(id));
+
+    if (toRemove.length) {
+      await query(env, `DELETE FROM essay_assignment_targets WHERE assignment_id = $1 AND user_id = ANY($2::uuid[])`,
+        [assignmentId, toRemove]);
+    }
+    if (toAdd.length) {
+      const params = [assignmentId]; const rowsSql = []; let p = 2;
+      for (const id of toAdd) { rowsSql.push(`($1, $${p++})`); params.push(id); }
+      await query(env, `INSERT INTO essay_assignment_targets (assignment_id, user_id) VALUES ${rowsSql.join(',')}`, params);
+    }
+  }
+
+  return json(request, { ok: true });
+}
+
+// Deletes the assignment and — via ON DELETE CASCADE — its targets and
+// every essay written against it, including graded ones. The frontend
+// confirms before calling this; there's no undo.
+async function handleDeleteAssignment(request, env, assignmentId) {
+  const gate = await requireParentSession(request, env);
+  if (gate.error) return gate.error;
+  const owns = await query(env, `SELECT id FROM essay_assignments WHERE id = $1 AND family_id = $2`,
+    [assignmentId, gate.family.id]);
+  if (!owns.rows?.length) return err(request, 'Assignment not found.', 404);
+  await query(env, `DELETE FROM essay_assignments WHERE id = $1`, [assignmentId]);
+  return json(request, { ok: true });
+}
+
 async function handleListAssignments(request, env) {
   return withUser(request, env, async (session) => {
     const family = await getMembership(env, session.user_id);
@@ -1186,6 +1260,10 @@ export default {
 
       if (path === '/essays/assignments' && method === 'POST') return await handleCreateAssignment(request, env);
       if (path === '/essays/assignments' && method === 'GET')  return await handleListAssignments(request, env);
+
+      const assignmentIdMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})$/);
+      if (assignmentIdMatch && method === 'PATCH')  return await handleUpdateAssignment(request, env, assignmentIdMatch[1]);
+      if (assignmentIdMatch && method === 'DELETE') return await handleDeleteAssignment(request, env, assignmentIdMatch[1]);
 
       const essayMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay$/);
       if (essayMatch && method === 'GET') return await handleGetEssay(request, env, essayMatch[1]);
