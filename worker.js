@@ -12,6 +12,7 @@
      POST   /family/create
      POST   /family/members/add
      POST   /family/members/remove
+     PATCH  /family/members/feedback-level
      POST   /family/leave
 
      GET    /tools
@@ -148,7 +149,7 @@ async function getSession(request, env) {
   const payload = await verifyJwt(token, env.JWT_SECRET);
   if (!payload?.session_id) return null;
   const r = await query(env,
-    `SELECT s.id AS session_id, u.id AS user_id, u.email, u.display_name, u.avatar_key, u.is_admin
+    `SELECT s.id AS session_id, u.id AS user_id, u.email, u.display_name, u.avatar_key, u.is_admin, u.feedback_level
        FROM sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.id = $1 AND s.expires_at > NOW()`,
@@ -292,7 +293,7 @@ async function handleLogout(request, env) {
 
 async function mePayload(env, userId) {
   const r = await query(env,
-    `SELECT id, email, display_name, avatar_key, is_admin FROM users WHERE id = $1`, [userId]);
+    `SELECT id, email, display_name, avatar_key, is_admin, feedback_level FROM users WHERE id = $1`, [userId]);
   const user = r.rows[0];
   const family = await getMembership(env, userId);
   return {
@@ -301,6 +302,7 @@ async function mePayload(env, userId) {
     display_name: user.display_name,
     avatar_key: user.avatar_key,
     is_admin: user.is_admin,
+    feedback_level: user.feedback_level,
     role: family?.role || null,
     family: family ? { id: family.id, name: family.name } : null,
   };
@@ -340,7 +342,7 @@ async function handleGetFamily(request, env) {
     const family = await getMembership(env, session.user_id);
     if (!family) return json(request, { family: null });
     const members = await query(env,
-      `SELECT u.id, u.email, u.display_name, u.avatar_key, fm.role, fm.added_at, u.last_login_at
+      `SELECT u.id, u.email, u.display_name, u.avatar_key, u.feedback_level, fm.role, fm.added_at, u.last_login_at
          FROM family_members fm
          JOIN users u ON u.id = fm.user_id
         WHERE fm.family_id = $1
@@ -424,6 +426,26 @@ async function handleRemoveMember(request, env) {
       [family.id, target.rows[0].id]);
     return json(request, { ok: true });
   });
+}
+
+// A parent sets the starting reading level for a family member's
+// feedback. Presentation only — grading is unaffected.
+async function handleSetFeedbackLevel(request, env) {
+  const session = await getSession(request, env);
+  if (!session) return err(request, 'Unauthorized', 401);
+  const family = await getMembership(env, session.user_id);
+  if (!family) return err(request, 'You are not in a family yet.');
+  if (family.role !== 'parent') return err(request, 'Only a parent can change reading level.', 403);
+
+  const { user_id, feedback_level } = await request.json();
+  if (!FEEDBACK_BAND_ORDER.includes(feedback_level)) return err(request, 'Unknown reading level.');
+
+  const target = await query(env,
+    `SELECT 1 FROM family_members WHERE family_id = $1 AND user_id = $2`, [family.id, user_id]);
+  if (!target.rows?.length) return err(request, 'That person is not in your family.', 404);
+
+  await query(env, `UPDATE users SET feedback_level = $1 WHERE id = $2`, [feedback_level, user_id]);
+  return json(request, { ok: true });
 }
 
 async function handleLeaveFamily(request, env) {
@@ -647,6 +669,50 @@ const ESSAY_RUBRIC = {
 };
 const ISSUE_TIERS = ['mechanics', 'clarity', 'organization', 'argument', 'rhetoric'];
 
+// Reading level for student-facing prose. Presentation only — never
+// affects grading. Ordered easiest → hardest; the ratchet below only
+// ever moves a student up.
+const FEEDBACK_BANDS = {
+  early_elementary: {
+    label: 'a reader in early elementary school (roughly ages 6-8)',
+    guidance: 'Use short sentences and everyday words. Do not use grammar terminology at all — say "these two sentences got squished together" instead of "comma splice". Be warm and very encouraging. Explain what to do, not just what went wrong.',
+  },
+  upper_elementary: {
+    label: 'a reader in upper elementary school (roughly ages 9-11)',
+    guidance: 'Use plain, direct language. You may name a grammar term but always explain it in the same breath — "this is a run-on sentence, which means two whole sentences joined without a break". Encouraging but straightforward.',
+  },
+  middle_school: {
+    label: 'a middle school reader (roughly ages 12-14)',
+    guidance: 'Use normal conversational language. Name grammar and rhetoric terms and give a short plain-English gloss the first time each appears. Treat the student as capable of handling direct criticism.',
+  },
+  high_school: {
+    label: 'a high school reader',
+    guidance: 'Write as you would to a capable high school student. Use standard composition vocabulary (thesis, evidence, transition, tone) without glossing it. Gloss only genuinely specialized terms like specific logical fallacies.',
+  },
+  college: {
+    label: 'a college-level reader',
+    guidance: 'Write as you would to a first-year college student in office hours. Use precise compositional and rhetorical vocabulary directly, without simplification.',
+  },
+};
+const FEEDBACK_BAND_ORDER = ['early_elementary', 'upper_elementary', 'middle_school', 'high_school', 'college'];
+// Average real score required to move up out of band i.
+const BAND_PROMOTE_AT = [55, 65, 75, 85];
+
+function feedbackBand(level) {
+  return FEEDBACK_BANDS[level] || FEEDBACK_BANDS.upper_elementary;
+}
+
+// Monotonic: only ever promotes, and only on a sustained average rather
+// than one lucky essay. `recentScores` is newest-first, current included.
+function maybePromoteFeedbackLevel(current, recentScores) {
+  const i = FEEDBACK_BAND_ORDER.indexOf(current);
+  if (i < 0 || i >= FEEDBACK_BAND_ORDER.length - 1) return current;
+  const window = (recentScores || []).slice(0, 3);
+  if (window.length < 3) return current;
+  const avg = window.reduce((a, b) => a + b, 0) / window.length;
+  return avg >= BAND_PROMOTE_AT[i] ? FEEDBACK_BAND_ORDER[i + 1] : current;
+}
+
 function clampInt(v, lo, hi) {
   const n = Math.round(Number(v) || 0);
   return Math.max(lo, Math.min(hi, n));
@@ -754,7 +820,8 @@ const COACHING_CHECK_TOOL = {
   },
 };
 
-function buildGradingSystemPrompt(assignment, issueHistory) {
+function buildGradingSystemPrompt(assignment, issueHistory, feedbackLevel) {
+  const band = feedbackBand(feedbackLevel);
   const rubricLines = Object.entries(ESSAY_RUBRIC).map(([, v]) => `- ${v.label}: ${v.max} points`).join('\n');
   const historyLines = (issueHistory || []).length
     ? issueHistory.map(h => `- ${h.issue_type} (${h.tier}): flagged in ${h.times_flagged} previous essay(s), recurred ${h.times_recurred_after_flagged} time(s) after being told about it`).join('\n')
@@ -779,10 +846,19 @@ THIS STUDENT'S RECURRING ISSUE HISTORY (from past essays):
 ${historyLines}
 If an issue below recurs from this history, say so plainly in your feedback and treat it as more serious than a first-time slip — the student has already been told.
 
+FEEDBACK VOICE:
+Write every piece of prose the student will read — sentence notes and suggestions, rubric notes, strengths, overall feedback, and the descriptions in issues_catalog — for ${band.label}. ${band.guidance}
+
+This governs only HOW you word things. It must NOT change what you look for or how you score:
+- Score against the fixed college rubric above regardless of this setting. A 74 means the same thing at every level.
+- Still find and report every real issue. If a 9-year-old commits a logical fallacy, still flag it — just describe it as "your reason doesn't quite prove your point" rather than naming it a non sequitur.
+- The issue_type slug stays a stable, consistent identifier (e.g. comma_splice, unsupported_claim) no matter what reading level the description is written for. Never simplify or rename the slug itself.
+
 Segment the essay into sentences covering the ENTIRE text with nothing omitted or reworded, and call the submit_essay_grade tool with your complete result. Be specific in every note — cite the actual words, not just the category.`;
 }
 
-function buildCoachingCheckPrompt(issue) {
+function buildCoachingCheckPrompt(issue, feedbackLevel) {
+  const band = feedbackBand(feedbackLevel);
   return `You are coaching a student revising their own essay. Here is one specific issue that was flagged:
 
 Type: ${issue.issue_type}
@@ -793,7 +869,9 @@ Below is the student's CURRENT full essay text after revision. Judge whether thi
 - "resolved": clearly fixed.
 - "partial": a real, good-faith attempt that improves things, even if not perfect.
 - "not_addressed": the issue is still there, or the student didn't seriously try.
-Be encouraging but honest — don't rubber-stamp a fix that isn't there, but don't demand perfection either. Call submit_fix_verdict with your result.`;
+Be encouraging but honest — don't rubber-stamp a fix that isn't there, but don't demand perfection either.
+
+Write your note for ${band.label}. ${band.guidance} This affects only your wording, not how strictly you judge whether the issue was actually fixed. Call submit_fix_verdict with your result.`;
 }
 
 function selectTopIssues(catalog, history) {
@@ -1056,7 +1134,7 @@ async function handleGradeEssay(request, env, assignmentId) {
     let result;
     try {
       result = await callClaude(env, {
-        system: buildGradingSystemPrompt(assignment, historyR.rows || []),
+        system: buildGradingSystemPrompt(assignment, historyR.rows || [], session.feedback_level),
         content: essay.draft_text,
         tool: GRADE_TOOL,
       });
@@ -1129,7 +1207,19 @@ async function handleGradeEssay(request, env, assignmentId) {
          feedback = $4::jsonb, coaching = $5::jsonb, graded_at = NOW() WHERE id = $6`,
       [essay.draft_text, scoreTotal, adaptiveScore, JSON.stringify(feedback), JSON.stringify(coaching), essay.id]);
 
-    return json(request, { ok: true, adaptive_score: adaptiveScore, feedback: stripScoresForLearner(feedback), coaching });
+    // Ratchet the feedback reading level up if their real scores now
+    // sustain it. Applies to the NEXT essay — this one is already worded.
+    const promoted = maybePromoteFeedbackLevel(session.feedback_level, [scoreTotal, ...priorScores]);
+    if (promoted !== session.feedback_level) {
+      await query(env, `UPDATE users SET feedback_level = $1 WHERE id = $2`, [promoted, session.user_id]);
+    }
+
+    return json(request, {
+      ok: true, adaptive_score: adaptiveScore,
+      feedback: stripScoresForLearner(feedback), coaching,
+      feedback_level: promoted,
+      level_promoted: promoted !== session.feedback_level,
+    });
   });
 }
 
@@ -1158,7 +1248,7 @@ async function handleCoachingCheck(request, env, assignmentId) {
     let verdict;
     try {
       verdict = await callClaude(env, {
-        system: buildCoachingCheckPrompt(issue),
+        system: buildCoachingCheckPrompt(issue, session.feedback_level),
         content: coaching.practice_text || '',
         tool: COACHING_CHECK_TOOL,
       });
@@ -1238,6 +1328,7 @@ export default {
       if (path === '/family/create'         && method === 'POST') return await handleCreateFamily(request, env);
       if (path === '/family/members/add'    && method === 'POST') return await handleAddMember(request, env);
       if (path === '/family/members/remove' && method === 'POST') return await handleRemoveMember(request, env);
+      if (path === '/family/members/feedback-level' && method === 'PATCH') return await handleSetFeedbackLevel(request, env);
       if (path === '/family/leave'          && method === 'POST') return await handleLeaveFamily(request, env);
 
       if (path === '/tools' && method === 'GET') return await handleListTools(request, env);

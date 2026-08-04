@@ -381,6 +381,14 @@ section + section{margin-top:3rem}
 }
 .crew-role.learner{color:var(--amber);border-color:rgba(245,165,36,.32)}
 .crew-seen{font-family:var(--font-mono);font-size:.6rem;color:var(--faint);white-space:nowrap}
+.level-select{
+  font-family:var(--font-mono);font-size:.6rem;letter-spacing:.06em;
+  padding:.3rem .45rem;border-radius:var(--r);
+  background:rgba(4,8,16,.7);color:var(--dim);border:1px solid var(--line);
+  cursor:pointer;transition:border-color .18s var(--ease),color .18s var(--ease);
+}
+.level-select:hover{border-color:var(--line-mid);color:var(--text)}
+.level-select:focus{outline:none;border-color:var(--line-hot);color:var(--text-bright)}
 
 .empty{
   padding:2.5rem 1.5rem;text-align:center;
@@ -444,6 +452,11 @@ section + section{margin-top:3rem}
   .auth-panel{padding:1.9rem 1.4rem 1.3rem}
   .code-cell{height:50px;font-size:1.2rem}
   .crew-seen{display:none}
+  /* Avatar + name hold line 1; the level picker, role and Remove
+     button wrap onto line 2 rather than overflowing the viewport. */
+  .crew-row{flex-wrap:wrap;row-gap:.6rem}
+  .crew-info{min-width:calc(100% - 60px)}
+  .level-select{max-width:8.5rem}
 }
 
 @media (prefers-reduced-motion:reduce){
@@ -1049,6 +1062,10 @@ async function loadCrew() {
   $('crewList').innerHTML = members.map(m => {
     const name  = m.display_name || m.email.split('@')[0];
     const canRemove = isParent && m.id !== AUTH.user.id;
+    const levelPicker = isParent ? `
+      <select class="level-select" data-level-for="${esc(m.id)}" title="Reading level for feedback — does not affect grading">
+        ${FEEDBACK_LEVELS.map(l => `<option value="${l.value}"${m.feedback_level === l.value ? ' selected' : ''}>${l.label}</option>`).join('')}
+      </select>` : '';
     return `
       <div class="crew-row">
         <div class="avatar">${esc(name[0].toUpperCase())}</div>
@@ -1056,12 +1073,33 @@ async function loadCrew() {
           <div class="nm">${esc(name)}</div>
           <div class="em">${esc(m.email)}</div>
         </div>
+        ${levelPicker}
         <span class="crew-role ${m.role === 'parent' ? '' : 'learner'}">${m.role === 'parent' ? 'Commander' : 'Cadet'}</span>
         <span class="crew-seen">${esc(relTime(m.last_login_at))}</span>
         ${canRemove ? `<button class="btn danger sm" data-remove="${esc(m.email)}">Remove</button>` : ''}
       </div>`;
   }).join('');
 }
+
+// Reading level for student-facing feedback. Rises automatically as
+// scores improve; this picker just sets the starting point.
+const FEEDBACK_LEVELS = [
+  { value: 'early_elementary', label: 'Early elementary' },
+  { value: 'upper_elementary', label: 'Upper elementary' },
+  { value: 'middle_school',    label: 'Middle school' },
+  { value: 'high_school',      label: 'High school' },
+  { value: 'college',          label: 'College' },
+];
+
+$('crewList').addEventListener('change', async e => {
+  const sel = e.target.closest('[data-level-for]');
+  if (!sel) return;
+  const r = await api('PATCH', '/family/members/feedback-level', {
+    user_id: sel.dataset.levelFor, feedback_level: sel.value,
+  });
+  if (r.error) { toast(r.error, true); await loadCrew(); return; }
+  toast('Reading level updated.');
+});
 
 $('crewList').addEventListener('click', async e => {
   const btn = e.target.closest('[data-remove]');

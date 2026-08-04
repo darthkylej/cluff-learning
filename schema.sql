@@ -23,6 +23,18 @@ CREATE TABLE IF NOT EXISTS users (
   last_login_at  timestamptz
 );
 
+-- The reading level that student-facing prose is written at. This is a
+-- PRESENTATION setting only — it never changes how work is graded, just
+-- how the feedback is worded. A parent sets the starting band; it then
+-- ratchets upward on its own as the student's real scores climb, and
+-- never moves back down (a demotion after one bad essay would sting
+-- more than the score does).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS feedback_level text NOT NULL DEFAULT 'upper_elementary';
+DO $$ BEGIN
+  ALTER TABLE users ADD CONSTRAINT users_feedback_level_check
+    CHECK (feedback_level IN ('early_elementary','upper_elementary','middle_school','high_school','college'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- ── One-time login codes ───────────────────────────────────────
 -- Codes are stored as SHA-256 hashes, never in plaintext.
 CREATE TABLE IF NOT EXISTS otp_codes (
