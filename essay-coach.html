@@ -54,6 +54,8 @@ body{margin:0;min-height:100%;background:var(--void);color:var(--text);font-fami
 .btn.ghost:hover{border-color:var(--line-mid);color:var(--text);box-shadow:none;background:rgba(79,209,224,.05)}
 .btn.sm{padding:.44rem .85rem;font-size:.63rem;letter-spacing:.15em}
 .btn.block{width:100%;display:block}
+a.btn{display:inline-block;text-decoration:none}
+.backBtn{white-space:nowrap}
 .btn.gold{color:var(--amber);border-color:rgba(245,165,36,.35);background:rgba(245,165,36,.08)}
 .btn.gold:hover{border-color:rgba(245,165,36,.65);color:#ffe3ad;box-shadow:0 0 20px -6px rgba(245,165,36,.5)}
 .btn.danger{color:var(--rose);border-color:rgba(251,113,133,.3);background:rgba(251,113,133,.07)}
@@ -225,6 +227,7 @@ main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3
       </svg>
       <span class="mark-text"><span class="mark-name">Cluff Learning</span><span class="mark-sub">Back to Bridge</span></span>
     </a>
+    <a class="btn ghost sm backBtn" href="index.html">← Bridge</a>
     <div class="topbar-spacer"></div>
     <span class="userchip">Signed in as <b id="userChipName">—</b></span>
     <button id="btnNewAssignment" class="btn sm" hidden>+ New Assignment</button>

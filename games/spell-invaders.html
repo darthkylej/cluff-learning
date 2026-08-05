@@ -46,6 +46,13 @@
   .topbar .brand-text{ font-family:var(--font-mono); font-size:.62rem; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); line-height:1.3; }
   .topbar .brand-text b{ display:block; color:var(--hull); font-size:.78rem; letter-spacing:.1em; }
   .topbar-spacer{ flex:1; }
+  .backBtn{ display:inline-block; white-space:nowrap; text-decoration:none;
+    background:linear-gradient(180deg,rgba(79,209,224,.14),rgba(79,209,224,.05)); color:var(--cyan);
+    border:1px solid var(--line-mid); padding:9px 15px; border-radius:var(--r); font-weight:700;
+    font-family:var(--font-mono); font-size:12.5px; letter-spacing:.1em; text-transform:uppercase;
+    transition:box-shadow .15s, background .15s, color .15s; }
+  .backBtn:hover{ border-color:var(--line-hot); background:linear-gradient(180deg,rgba(79,209,224,.24),rgba(79,209,224,.09));
+    color:var(--hull); box-shadow:0 0 20px -6px rgba(79,209,224,.55); }
   .userchip{ font-family:var(--font-mono); font-size:.68rem; letter-spacing:.08em; color:var(--muted); }
   .userchip b{ color:var(--cyan); font-weight:600; }
   header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
@@ -201,7 +208,7 @@
     .topbar{ gap:.5rem; padding:.65rem .8rem; }
     .topbar .brand-text{ display:none; }
     .userchip{ display:none; }
-    button{ padding:8px 11px; font-size:11px; }
+    button, .backBtn{ padding:8px 11px; font-size:11px; }
   }
 
   @media (prefers-reduced-motion: reduce){
@@ -231,6 +238,7 @@
       </svg>
       <span class="brand-text"><b>Cluff Learning</b>Back to Bridge</span>
     </a>
+    <a class="backBtn" href="../index.html">← Bridge</a>
     <div class="topbar-spacer"></div>
     <span class="userchip">Flying as <b id="userChipName">—</b></span>
     <span class="tag" id="syncTag">● Synced</span>

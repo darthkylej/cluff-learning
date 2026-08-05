@@ -1032,7 +1032,9 @@ async function loadTools() {
 
 function launch(card) {
   const url = card.dataset.url;
-  if (url) window.open(url, '_blank', 'noopener');
+  // Same tab, on purpose — each module carries its own "Back to Bridge"
+  // control, so stacking up tabs buys nothing.
+  if (url) location.href = url;
 }
 $('toolGrid').addEventListener('click', e => {
   const card = e.target.closest('.tool.live');
