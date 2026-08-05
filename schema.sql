@@ -147,6 +147,10 @@ INSERT INTO tools (slug, name, tagline, description, glyph, accent, status, url,
    'Spell your way to credits, then arm your ship and defend Earth. Word mastery is tracked per player.',
    '◆', 'amber',  'online',  'https://darthkylej.github.io/cluff-learning/games/spell-invaders.html', 20),
 
+  ('math-facts',     'Fact Runner',     'Math facts under pressure',
+   'Multiplication, division, addition and subtraction facts. Answer fast to stay ahead of the monster — a right answer is a step forward, a wrong one is a step back.',
+   '∑', 'violet', 'online',  'https://darthkylej.github.io/cluff-learning/games/fact-runner.html', 25),
+
   ('spanish-tutor',  'Spanish Comms',   'Live conversation practice',
    'Talk with an AI conversation partner in Spanish at your level, with gentle correction.',
    '⌬', 'violet', 'planned', NULL, 30),

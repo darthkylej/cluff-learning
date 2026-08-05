@@ -19,10 +19,16 @@ Browser  ──▶  index.html         GitHub Pages
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | Whole frontend — access terminal + bridge homepage. No build step, no dependencies. |
+| `index.html` | Access terminal + bridge homepage. No build step, no dependencies. |
+| `essay-coach.html` | Essay Coach module. |
+| `games/spell-invaders.html` | Spell Invaders module. |
+| `games/fact-runner.html` | Fact Runner module — math facts. |
 | `worker.js` | API: auth, family/crew registry, module registry, per-tool saved state. |
 | `wrangler.toml` | Worker config and the list of required secrets. |
 | `schema.sql` | Postgres schema + seeded module registry. Idempotent. |
+
+Every module is a single self-contained HTML file that signs in against the
+same Worker with the JWT already in `localStorage`.
 
 ## Sign-in model
 
@@ -58,8 +64,9 @@ Differences from condscript's auth, all deliberate:
 - `tool_progress` — generic `jsonb` state bucket, one row per (user, tool)
 - `activity_log` — append-only event stream for a future parent dashboard
 
-`tool_progress` and `activity_log` are scaffolding for the modules that come
-next; nothing writes to `activity_log` yet.
+`tool_progress` is what the modules save into — one `jsonb` blob per (user,
+tool), so a new module needs no migration. `activity_log` is still scaffolding;
+nothing writes to it yet.
 
 ## Setup
 
@@ -142,7 +149,33 @@ module online is an `UPDATE`, not a frontend change.
 | Slug | Status |
 | --- | --- |
 | `code-lab` | online — links to [Safe-Coding-Helper-for-Kids](https://darthkylej.github.io/Safe-Coding-Helper-for-Kids/) |
-| `spelling-drill` | standby |
+| `spelling-drill` | online — `games/spell-invaders.html` |
+| `math-facts` | online — `games/fact-runner.html` |
+| `essay-coach` | online — `essay-coach.html` |
 | `spanish-tutor` | standby |
-| `essay-coach` | standby |
 | `typing-trainer` | standby |
+
+Modules open in the **same tab** as the bridge, and each one carries a
+**← Bridge** button back. Nothing opens a new window.
+
+### Fact Runner
+
+Arithmetic drill wrapped in a chase. A problem appears, the answer is typed and
+submitted with Enter; correct answers bling green and move the runner a step
+forward, wrong ones buzz red and cost a step. A missed problem is shown with its
+answer and then **repeats until it is answered correctly**. The monster behind
+advances continuously and accelerates with both elapsed time and score, so a run
+always ends eventually — the score is how long you held it off.
+
+Problem sets, all selectable independently:
+
+| Set | Range |
+| --- | --- |
+| Multiplication | 1–12 × 1–12 — all 144 facts |
+| Division | dividend ÷ 1–12, always exact, dividend ≤ 144 |
+| Addition | 1–100 + 1–100 |
+| Subtraction | 1–100 − 1–100, answers −99 to 99 |
+
+State lives in `tool_progress` under `math-facts`: best score, run count,
+furthest distance, chosen operations, mute. No new tables and no new endpoints —
+it rides the generic `/progress/:slug` pair.
