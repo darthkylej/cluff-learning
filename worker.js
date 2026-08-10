@@ -39,6 +39,14 @@
      POST   /essays/assignments/:id/essay/coaching/check
      GET    /essays/assignments/:id/essay/:studentId/results
 
+     POST   /spanish/session
+     POST   /spanish/session/:id/turn
+     POST   /spanish/session/:id/end
+     GET    /spanish/profile
+     PATCH  /spanish/profile
+     GET    /spanish/reports/:studentId
+     PATCH  /spanish/settings/:studentId
+
    Registration is closed. An email can only request a login code
    if a users row already exists for it — created either by a
    parent via /family/members/add, or by listing the address in
@@ -718,7 +726,9 @@ function clampInt(v, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-async function callClaude(env, { system, content, tool }) {
+// `model`, `maxTokens` and `cacheSystem` are optional; omitting them
+// preserves the original behaviour used by Essay Coach.
+async function callClaude(env, { system, content, tool, model, maxTokens, cacheSystem }) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -727,9 +737,11 @@ async function callClaude(env, { system, content, tool }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 8000,
-      system,
+      model: model || CLAUDE_MODEL,
+      max_tokens: maxTokens || 8000,
+      system: cacheSystem
+        ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+        : system,
       messages: [{ role: 'user', content }],
       tools: [tool],
       tool_choice: { type: 'tool', name: tool.name },
@@ -1307,6 +1319,948 @@ async function handleGetEssayResults(request, env, assignmentId, studentId) {
   });
 }
 
+/* ============================================================
+   Spanish Coach — voice-first conversation (Engine P: pipeline)
+
+   Browser does speech-to-text and playback. The Worker owns the
+   conversation brain (Claude), the pedagogical event log, the
+   budget gates, and speech synthesis. Nothing paid is reachable
+   from the browser without passing through here.
+============================================================ */
+
+const SPANISH_TURN_MODEL     = 'claude-sonnet-5';  // latency-sensitive
+const SPANISH_CONSOLIDATE_MODEL = 'claude-opus-5'; // quality-sensitive, once per session
+
+// Phase windows are fractions of the session, so they scale with
+// a 15 / 20 / 30-minute setting without redefining the arc.
+const SPANISH_PHASES = [
+  { key: 'saludo',   name: 'Saludo',   until: 0.10,
+    brief: 'Greeting ritual. Say hello warmly, ask how they are, ask one easy personal question.' },
+  { key: 'recuerdo', name: 'Recuerdo', until: 0.20,
+    brief: 'Call back to last time using the plan’s hooks. Reuse a past win; elicit one open target naturally.' },
+  { key: 'tema',     name: 'Tema',     until: 0.53,
+    brief: 'Today’s topic. Work the target words and structures into genuine conversation — never a drill.' },
+  { key: 'escena',   name: 'Escena',   until: 0.77,
+    brief: 'Role-play the scenario. Play your character; let the learner act and decide.' },
+  { key: 'juego',    name: 'Juego',    until: 0.90,
+    brief: 'Play the game from the plan using today’s words. Keep it light and quick.' },
+  { key: 'cierre',   name: 'Cierre',   until: 1.01,
+    brief: 'Closing. Recap three good words, praise one specific win, preview tomorrow, say goodbye warmly.' },
+];
+
+const SPANISH_INTERVENTIONS = [
+  'ignore', 'recast', 'expansion', 'extension',
+  'clarification', 'guided_repair', 'explicit_correction',
+];
+const SPANISH_SKILL_TYPES = ['grammar', 'vocabulary', 'comprehension', 'fluency', 'pronunciation'];
+
+function spanishNum(v, lo, hi, dflt) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
+}
+function cleanText(v, max) {
+  const s = String(v ?? '').trim();
+  return s ? s.slice(0, max) : null;
+}
+function cleanKey(v) {
+  const s = String(v ?? '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  return s ? s.slice(0, 60) : null;
+}
+
+function defaultSpanishProfile() {
+  return {
+    comprehension_level: 'novice_low', production_level: 'novice_low',
+    correction_intensity: 'balanced', english_support: 'as_needed',
+    speech_rate: 0.92, session_minutes: 15, daily_session_cap: 4,
+    weekly_minutes_goal: 105, transcript_retention: 'days_30',
+    show_direct_button: true, interests: [], profile_summary: '',
+    total_seconds: 0, total_sessions: 0,
+  };
+}
+
+async function getSpanishProfile(env, userId) {
+  const r = await query(env, `SELECT * FROM spanish_profiles WHERE user_id = $1`, [userId]);
+  if (r.rows?.[0]) return r.rows[0];
+  await query(env, `INSERT INTO spanish_profiles (user_id) VALUES ($1)
+                    ON CONFLICT (user_id) DO NOTHING`, [userId]);
+  return { user_id: userId, ...defaultSpanishProfile() };
+}
+
+// Which phase are we in, given seconds elapsed and the session length?
+function spanishPhase(elapsedSeconds, totalMinutes) {
+  const frac = totalMinutes > 0 ? elapsedSeconds / (totalMinutes * 60) : 1;
+  return SPANISH_PHASES.find(p => frac < p.until) || SPANISH_PHASES[SPANISH_PHASES.length - 1];
+}
+
+// The coach cannot keep time; we tell it the time every turn.
+function spanishClockLine(elapsedSeconds, totalMinutes) {
+  const phase     = spanishPhase(elapsedSeconds, totalMinutes);
+  const minute    = Math.floor(elapsedSeconds / 60);
+  const remaining = totalMinutes * 60 - elapsedSeconds;
+  if (remaining <= 90) {
+    return `[CLOCK] ${Math.max(0, Math.round(remaining))} seconds remain. Phase: Cierre — begin the closing now. ${phase.brief}`;
+  }
+  return `[CLOCK] Minute ${minute} of ${totalMinutes}. Phase: ${phase.name} — ${phase.brief}`;
+}
+
+// Estimated seconds of speech for a Spanish utterance (~15 chars/sec).
+function spanishSpeechSeconds(text) {
+  return Math.max(0.5, Math.round((String(text || '').length / 15) * 10) / 10);
+}
+
+function spanishNextReview(estimate, recurrenceCount) {
+  let days;
+  if (recurrenceCount >= 3)   days = 1;
+  else if (estimate < 0.35)   days = 2;
+  else if (estimate < 0.55)   days = 5;
+  else if (estimate < 0.75)   days = 12;
+  else                        days = 30;
+  return new Date(Date.now() + days * 86400000).toISOString();
+}
+
+// ── Tool contracts ─────────────────────────────────────────────
+const SPANISH_TURN_TOOL = {
+  name: 'spanish_turn',
+  description: 'Reply to the learner and record the pedagogical decision for their turn.',
+  input_schema: {
+    type: 'object',
+    required: ['reply_text'],
+    properties: {
+      reply_text: {
+        type: 'string',
+        description: 'What the coach says aloud. One or two short sentences of Spanish, ending with a genuine question or choice.',
+      },
+      emphasis_word: {
+        type: 'string',
+        description: 'If this reply recasts a form, the single corrected word or phrase to stress slightly when speaking.',
+      },
+      intervention: {
+        type: 'object',
+        required: ['intervention_type'],
+        properties: {
+          intervention_type: { type: 'string', enum: SPANISH_INTERVENTIONS },
+          intended_meaning:  { type: 'string' },
+          learner_form:      { type: 'string' },
+          target_form:       { type: 'string' },
+          skill_key:         { type: 'string', description: 'stable snake_case id, e.g. preterite_ir_first_person' },
+          display_name:      { type: 'string' },
+          skill_type:        { type: 'string', enum: SPANISH_SKILL_TYPES },
+          importance:        { type: 'integer', minimum: 1, maximum: 5 },
+          recognition_uncertain:      { type: 'boolean' },
+          learner_repeated_correctly: { type: 'boolean' },
+        },
+      },
+      vocabulary: {
+        type: 'array',
+        description: 'Meaningful vocabulary exposure or production in this exchange.',
+        items: {
+          type: 'object',
+          required: ['lemma', 'evidence'],
+          properties: {
+            lemma:         { type: 'string' },
+            english_gloss: { type: 'string' },
+            evidence:      { type: 'string', enum: ['heard', 'produced_correctly', 'produced_with_help'] },
+          },
+        },
+      },
+    },
+  },
+};
+
+const SPANISH_CONSOLIDATE_TOOL = {
+  name: 'submit_session_consolidation',
+  description: 'Summarize the finished session and plan the next one.',
+  input_schema: {
+    type: 'object',
+    required: ['parent_summary', 'learner_summary', 'next_lesson_plan'],
+    properties: {
+      parent_summary: {
+        type: 'string',
+        description: 'Two to four sentences for a parent. Use ONLY the supplied aggregates and transcript. Never invent numbers or diagnoses.',
+      },
+      learner_summary: {
+        type: 'string',
+        description: 'One or two simple sentences the child will read, warm and specific.',
+      },
+      phrases_to_remember: {
+        type: 'array', items: { type: 'string' },
+        description: 'Up to three short Spanish phrases from this session worth keeping.',
+      },
+      profile_summary: {
+        type: 'string',
+        description: 'Updated running description of this learner: interests, level, habits worth remembering.',
+      },
+      next_lesson_plan: {
+        type: 'object',
+        required: ['callback_hooks', 'target_words'],
+        properties: {
+          unit_key:       { type: 'string' },
+          scenario_key:   { type: 'string' },
+          game:           { type: 'string' },
+          callback_hooks: { type: 'array', items: { type: 'string' },
+                            description: 'Specific things to bring up next time, in Spanish or English.' },
+          target_words:   { type: 'array', items: { type: 'string' } },
+          review_words:   { type: 'array', items: { type: 'string' } },
+          target_structures: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { skill_key: { type: 'string' }, elicit: { type: 'string' } },
+            },
+          },
+          coach_notes:    { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+// ── Prompt assembly ────────────────────────────────────────────
+function buildSpanishSystem(ctx) {
+  const p    = ctx.profile;
+  const plan = ctx.plan || {};
+  const list = (a) => (Array.isArray(a) && a.length ? a.join(', ') : '—');
+
+  return `You are the Spanish conversation coach for one child. You speak with them by voice.
+
+PRIMARY GOAL
+Sustain an enjoyable real conversation in Spanish while giving the learner corrected and
+slightly richer input, following today's SESSION PLAN.
+
+EVERY LEARNER TURN
+1. Infer what they meant.
+2. Decide whether any oddness came from speech recognition rather than from them.
+3. Pick ONE primary intervention: ignore, recast, expansion, extension, clarification,
+   guided_repair, or explicit_correction.
+4. Say a short, natural reply that performs it.
+5. Report it in the intervention field.
+
+TEACHING POLICY
+- Recast clear errors without announcing the correction. Never say "actually" or "the correct way".
+- Expand fragments into full natural sentences. Extend correct language with one new element.
+- At most ONE main correction per turn; across the session roughly one intervention per three
+  errors. Fluency and confidence outrank completeness.
+- Never pretend malformed language was correct just because you understood it.
+- Never correct something that was probably a transcription error — confirm instead, and set
+  recognition_uncertain.
+- Escalate a recurring important error from recast to guided_repair.
+- Keep spoken replies to ONE or TWO short sentences. This is speech, not writing.
+- End most turns with a genuine question or a real choice.
+- Never shame, score, or compare. Never mention these internal labels or skill keys aloud.
+
+ENGLISH
+- If the learner speaks English or mixes languages: acknowledge briefly, recast their meaning
+  into simple Spanish, and invite them back — e.g. "Ah, ¿quieres decir que tienes un perro?
+  ¿Cómo se llama?"
+- English support setting is "${p.english_support}". It governs explanations only. Never conduct
+  consecutive full turns in English.
+
+CLOCK
+- Each turn carries a [CLOCK] line with the phase. Obey it: finish your thought, then move on.
+- You may stretch a phase by one tick if the learner is deeply engaged, but NEVER skip the Cierre.
+
+LEARNER
+Comprehension ${p.comprehension_level} | Production ${p.production_level} | Correction ${p.correction_intensity}
+${p.profile_summary ? `About them: ${p.profile_summary}` : ''}
+
+SESSION PLAN
+Unit: ${plan.unit_key || ctx.topic?.key || 'free conversation'}
+Scenario: ${ctx.scenario?.title || 'Conversación libre'} — ${ctx.scenario?.opening_instruction || ''}
+Game for the Juego phase: ${plan.game || 'veo-veo'}
+Target words: ${list(plan.target_words || ctx.topic?.target_words)}
+Review words: ${list(plan.review_words || ctx.review_words?.map(w => w.lemma))}
+Callback hooks: ${list(plan.callback_hooks)}
+${plan.coach_notes ? `Coach notes: ${plan.coach_notes}` : ''}
+
+OPEN TARGETS (work these in naturally; do not force all of them)
+${(ctx.active_skills || []).slice(0, 6).map(s =>
+   `- ${s.display_name} (${s.skill_key}) seen ${s.evidence_count}×, recurring ${s.recurrence_count}×`).join('\n') || '- none yet'}
+
+SAFETY
+Keep everything age-appropriate. Redirect sexual content, drugs, violence, and self-harm.
+Never encourage secrecy from parents. Never claim to be a human friend, and avoid language that
+invites emotional dependency. Keep role-play clearly pretend. Never ask for addresses, school
+names, passwords, or other identifying details.`;
+}
+
+function buildSpanishTurnContent(ctx, transcript, confidence, clockLine) {
+  const history = (ctx.history || []).map(t =>
+    `${t.speaker === 'coach' ? 'COACH' : 'LEARNER'}: ${t.transcript}`).join('\n');
+
+  if (!transcript) {
+    return `${clockLine}\n\n${history ? `CONVERSATION SO FAR\n${history}\n\n` : ''}` +
+      `The session is starting and the learner has not spoken yet. Greet them warmly in Spanish ` +
+      `and ask one easy opening question. Do not report an intervention.`;
+  }
+
+  const conf = confidence == null ? 'unknown'
+    : confidence < 0.6 ? `${confidence.toFixed(2)} (LOW — likely a recognition problem, not a learner error)`
+    : confidence.toFixed(2);
+
+  return `${clockLine}\n\n${history ? `CONVERSATION SO FAR\n${history}\n\n` : ''}` +
+    `LEARNER JUST SAID (speech recognition, confidence ${conf}):\n"${transcript}"\n\n` +
+    `Reply as the coach.`;
+}
+
+// ── Context loading ────────────────────────────────────────────
+async function loadSpanishContext(env, userId, scenarioKey) {
+  const profile = await getSpanishProfile(env, userId);
+
+  const [planR, skillsR, vocabR, recentR, scenarioR] = await Promise.all([
+    query(env, `SELECT id, sequence, plan FROM spanish_lesson_plans
+                 WHERE user_id = $1 AND used_by_session IS NULL
+                 ORDER BY sequence DESC LIMIT 1`, [userId]),
+    query(env, `SELECT skill_key, display_name, skill_type, estimate,
+                       evidence_count, recurrence_count
+                  FROM spanish_skills WHERE user_id = $1
+                 ORDER BY CASE WHEN next_review_at <= NOW() THEN 0 ELSE 1 END,
+                          recurrence_count DESC, estimate ASC
+                 LIMIT 12`, [userId]),
+    query(env, `SELECT lemma, english_gloss, mastery FROM spanish_vocabulary
+                 WHERE user_id = $1
+                 ORDER BY CASE WHEN next_review_at <= NOW() THEN 0 ELSE 1 END, mastery ASC
+                 LIMIT 20`, [userId]),
+    query(env, `SELECT summary FROM spanish_sessions
+                 WHERE user_id = $1 AND status = 'completed'
+                 ORDER BY started_at DESC LIMIT 3`, [userId]),
+    query(env, `SELECT * FROM spanish_scenarios WHERE key = $1 AND enabled`, [scenarioKey]),
+  ]);
+
+  const planRow = planR.rows?.[0] || null;
+  const plan    = planRow?.plan || null;
+
+  // Scenario: the plan's choice wins, then the request, then free talk.
+  let scenario = scenarioR.rows?.[0] || null;
+  if (plan?.scenario_key && plan.scenario_key !== scenarioKey) {
+    const alt = await query(env, `SELECT * FROM spanish_scenarios WHERE key = $1 AND enabled`,
+      [plan.scenario_key]);
+    if (alt.rows?.[0]) scenario = alt.rows[0];
+  }
+  if (!scenario) {
+    const fallback = await query(env,
+      `SELECT * FROM spanish_scenarios WHERE key = 'free-talk'`, []);
+    scenario = fallback.rows?.[0] || {
+      key: 'free-talk', title: 'Conversación libre',
+      opening_instruction: 'Invite the learner to choose a topic.',
+    };
+  }
+
+  // Topic: the plan's unit, else the next unit by curriculum order.
+  let topic = null;
+  if (plan?.unit_key) {
+    const t = await query(env, `SELECT * FROM spanish_topics WHERE key = $1 AND enabled`, [plan.unit_key]);
+    topic = t.rows?.[0] || null;
+  }
+  if (!topic) {
+    const t = await query(env,
+      `SELECT * FROM spanish_topics WHERE enabled ORDER BY unit_order LIMIT 1`, []);
+    topic = t.rows?.[0] || null;
+  }
+
+  return {
+    profile, scenario, topic, plan, plan_id: planRow?.id || null,
+    plan_sequence: planRow?.sequence || 0,
+    active_skills: skillsR.rows || [],
+    review_words:  vocabR.rows || [],
+    recent_sessions: recentR.rows || [],
+  };
+}
+
+// ── Speech synthesis (proxied; the key stays here) ─────────────
+async function spanishSynthesize(env, text, emphasisWord) {
+  if (!env.OPENAI_API_KEY) return null;   // graceful: caller falls back to text-only
+
+  const instructions =
+    'Speak as a warm, patient adult talking with a young child learning Spanish. ' +
+    'Natural Latin American Spanish, clear and unhurried, friendly and encouraging. ' +
+    (emphasisWord
+      ? `Say "${emphasisWord}" slightly slower and with gentle emphasis so it stands out.`
+      : '');
+
+  const res = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: env.SPANISH_TTS_MODEL || 'gpt-4o-mini-tts',
+      voice: env.SPANISH_TTS_VOICE || 'coral',
+      input: text,
+      instructions,
+      response_format: 'mp3',
+      speed: spanishNum(env.SPANISH_TTS_SPEED, 0.5, 1.5, 1.0),
+    }),
+  });
+  if (!res.ok) {
+    console.error('TTS failed', res.status, (await res.text()).slice(0, 300));
+    return null;
+  }
+
+  // Chunked base64 so a long clip cannot blow the argument limit.
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+// ── Session creation ───────────────────────────────────────────
+async function handleCreateSpanishSession(request, env) {
+  return withUser(request, env, async (session) => {
+    const family = await getMembership(env, session.user_id);
+    if (!family) return err(request, 'Join a family before using Spanish Coach.', 403);
+
+    const access = await query(env,
+      `SELECT COALESCE(ta.enabled, true) AS enabled
+         FROM tools t
+         LEFT JOIN tool_access ta ON ta.tool_slug = t.slug AND ta.user_id = $1
+        WHERE t.slug = 'spanish-tutor'`, [session.user_id]);
+    if (access.rows?.[0]?.enabled === false) {
+      return err(request, 'Spanish Coach is not enabled for this account.', 403);
+    }
+
+    const body        = await request.json().catch(() => ({}));
+    const scenarioKey = cleanKey(body.scenario_key) || 'free-talk';
+    const profile     = await getSpanishProfile(env, session.user_id);
+
+    // Close out anything stale before counting.
+    await query(env,
+      `UPDATE spanish_sessions SET status = 'abandoned', ended_at = NOW()
+        WHERE user_id = $1 AND status = 'active'
+          AND started_at < NOW() - make_interval(mins => $2)`,
+      [session.user_id, Number(profile.session_minutes) + 5]);
+
+    // Layer 1 — budget gates, before anything paid happens.
+    const usage = await query(env,
+      `SELECT
+         COALESCE((SELECT SUM(input_audio_seconds + output_audio_seconds)
+                     FROM spanish_sessions
+                    WHERE started_at >= date_trunc('month', NOW())), 0) AS month_secs,
+         (SELECT COUNT(*) FROM spanish_sessions
+           WHERE user_id = $1 AND started_at::date = CURRENT_DATE
+             AND status <> 'failed') AS today_sessions`,
+      [session.user_id]);
+
+    const monthMinutes  = Number(usage.rows?.[0]?.month_secs || 0) / 60;
+    const todaySessions = Number(usage.rows?.[0]?.today_sessions || 0);
+    const monthCap      = spanishNum(env.SPANISH_MONTHLY_AUDIO_MINUTES, 60, 100000, 2400);
+    const dailyCap      = spanishNum(profile.daily_session_cap, 1, 10, 4);
+
+    if (monthMinutes >= monthCap) {
+      return err(request, 'Spanish Coach has used up this month’s practice time. It resets on the 1st.', 429);
+    }
+    if (todaySessions >= dailyCap) {
+      return err(request, '¡Ya practicaste mucho hoy! That’s plenty of Spanish for today — ¡hasta mañana!', 429);
+    }
+
+    const ctx = await loadSpanishContext(env, session.user_id, scenarioKey);
+
+    const created = await query(env,
+      `INSERT INTO spanish_sessions (user_id, scenario_key, topic_key, engine, model_name, plan_id)
+       VALUES ($1, $2, $3, 'pipeline', $4, $5)
+       RETURNING id, started_at`,
+      [session.user_id, ctx.scenario.key, ctx.topic?.key || null,
+       SPANISH_TURN_MODEL, ctx.plan_id]);
+
+    const sessionId = created.rows[0].id;
+    if (ctx.plan_id) {
+      await query(env, `UPDATE spanish_lesson_plans SET used_by_session = $1 WHERE id = $2`,
+        [sessionId, ctx.plan_id]);
+    }
+
+    return json(request, {
+      session_id:      sessionId,
+      started_at:      created.rows[0].started_at,
+      session_minutes: Number(profile.session_minutes),
+      scenario:        { key: ctx.scenario.key, title: ctx.scenario.title,
+                         description: ctx.scenario.description },
+      topic:           ctx.topic ? { key: ctx.topic.key, title: ctx.topic.title } : null,
+      plan:            ctx.plan,
+      phases:          SPANISH_PHASES.map(p => ({ key: p.key, name: p.name, until: p.until })),
+      show_direct_button: profile.show_direct_button,
+      speech_rate:     Number(profile.speech_rate),
+    }, 201);
+  });
+}
+
+// ── One conversation turn ──────────────────────────────────────
+async function handleSpanishTurn(request, env, sessionId) {
+  return withUser(request, env, async (session) => {
+    const sr = await query(env,
+      `SELECT * FROM spanish_sessions WHERE id = $1 AND user_id = $2 AND status = 'active'`,
+      [sessionId, session.user_id]);
+    const sess = sr.rows?.[0];
+    if (!sess) return err(request, 'Active session not found.', 404);
+
+    const profile   = await getSpanishProfile(env, session.user_id);
+    const totalMin  = Number(profile.session_minutes);
+    const elapsed   = (Date.now() - new Date(sess.started_at).getTime()) / 1000;
+    if (elapsed > (totalMin * 60) + 30) {
+      return err(request, 'Session time is up.', 409);
+    }
+
+    const body       = await request.json().catch(() => ({}));
+    const transcript = cleanText(body.transcript, 2000);
+    const confidence = Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : null;
+    const turnIndex  = clampInt(body.turn_index, 0, 100000);
+    const control    = cleanKey(body.control);      // slower | repeat | meaning | direct
+    const phase      = spanishPhase(elapsed, totalMin);
+
+    // Recent history keeps the prompt bounded on long sessions.
+    const histR = await query(env,
+      `SELECT speaker, transcript FROM spanish_turns
+        WHERE session_id = $1 ORDER BY id DESC LIMIT 16`, [sessionId]);
+    const history = (histR.rows || []).reverse();
+
+    if (transcript) {
+      await query(env,
+        `INSERT INTO spanish_turns
+           (session_id, turn_index, speaker, transcript, transcript_confidence, audio_seconds, phase)
+         VALUES ($1,$2,'learner',$3,$4,$5,$6)
+         ON CONFLICT (session_id, turn_index, speaker) DO NOTHING`,
+        [sessionId, turnIndex, transcript, confidence,
+         spanishNum(body.audio_seconds, 0, 300, spanishSpeechSeconds(transcript)), phase.key]);
+    }
+
+    const ctx = await loadSpanishContext(env, session.user_id, sess.scenario_key);
+    ctx.history = history;
+
+    let clockLine = spanishClockLine(elapsed, totalMin);
+    if (control) {
+      const extra = {
+        slower:  'The learner pressed "slower". Speak more simply and slowly for the next few turns.',
+        repeat:  'The learner pressed "repeat". Say your last message again in simpler Spanish.',
+        meaning: 'The learner pressed "what does that mean". Briefly explain your last message in English, then continue in Spanish.',
+        direct:  'The learner pressed "correct me". For their next error, give a brief direct correction and invite them to say it again.',
+      }[control];
+      if (extra) clockLine += `\n[CONTROL] ${extra}`;
+    }
+
+    let result;
+    try {
+      result = await callClaude(env, {
+        system:      buildSpanishSystem(ctx),
+        content:     buildSpanishTurnContent(ctx, transcript, confidence, clockLine),
+        tool:        SPANISH_TURN_TOOL,
+        model:       SPANISH_TURN_MODEL,
+        maxTokens:   700,
+        cacheSystem: true,
+      });
+    } catch (e) {
+      console.error('Spanish turn failed', e);
+      return err(request, 'The coach had trouble hearing that — try again.', 502);
+    }
+
+    const replyText = cleanText(result.reply_text, 1200);
+    if (!replyText) return err(request, 'The coach had trouble replying — try again.', 502);
+
+    await query(env,
+      `INSERT INTO spanish_turns (session_id, turn_index, speaker, transcript, audio_seconds, phase)
+       VALUES ($1,$2,'coach',$3,$4,$5)
+       ON CONFLICT (session_id, turn_index, speaker) DO NOTHING`,
+      [sessionId, turnIndex, replyText, spanishSpeechSeconds(replyText), phase.key]);
+
+    // Pedagogical event — recorded server-side, never client-trusted.
+    const iv = result.intervention;
+    if (iv && SPANISH_INTERVENTIONS.includes(iv.intervention_type)) {
+      await query(env,
+        `INSERT INTO spanish_interventions
+           (session_id, learner_turn_index, intervention_type, intended_meaning,
+            learner_form, target_form, skill_key, importance,
+            recognition_uncertain, learner_repeated_correctly)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [sessionId, turnIndex, iv.intervention_type,
+         cleanText(iv.intended_meaning, 500), cleanText(iv.learner_form, 500),
+         cleanText(iv.target_form, 500), cleanKey(iv.skill_key),
+         clampInt(iv.importance, 1, 5), iv.recognition_uncertain === true,
+         typeof iv.learner_repeated_correctly === 'boolean' ? iv.learner_repeated_correctly : null]);
+
+      if (iv.skill_key && !iv.recognition_uncertain) {
+        await applySpanishSkillEvidence(env, session.user_id, iv);
+      }
+    }
+
+    for (const v of (Array.isArray(result.vocabulary) ? result.vocabulary.slice(0, 8) : [])) {
+      const lemma = cleanText(v.lemma, 80);
+      if (!lemma) continue;
+      const correct = v.evidence === 'produced_correctly' ? 1 : 0;
+      const helped  = v.evidence === 'produced_with_help' ? 1 : 0;
+      await query(env,
+        `INSERT INTO spanish_vocabulary
+           (user_id, lemma, english_gloss, exposures, produced_correctly,
+            produced_with_help, mastery, last_seen_at, next_review_at)
+         VALUES ($1,$2,$3,1,$4,$5,$6,NOW(),$7)
+         ON CONFLICT (user_id, lemma) DO UPDATE SET
+           english_gloss      = COALESCE(EXCLUDED.english_gloss, spanish_vocabulary.english_gloss),
+           exposures          = spanish_vocabulary.exposures + 1,
+           produced_correctly = spanish_vocabulary.produced_correctly + EXCLUDED.produced_correctly,
+           produced_with_help = spanish_vocabulary.produced_with_help + EXCLUDED.produced_with_help,
+           mastery            = LEAST(0.99, spanish_vocabulary.mastery + $8),
+           last_seen_at       = NOW(),
+           next_review_at     = EXCLUDED.next_review_at`,
+        [session.user_id, lemma, cleanText(v.english_gloss, 120), correct, helped,
+         correct ? 0.25 : 0.12, spanishNextReview(correct ? 0.4 : 0.2, 0),
+         correct ? 0.14 : 0.05]);
+    }
+
+    const learnerSecs = transcript
+      ? spanishNum(body.audio_seconds, 0, 300, spanishSpeechSeconds(transcript)) : 0;
+    const coachSecs   = spanishSpeechSeconds(replyText);
+    await query(env,
+      `UPDATE spanish_sessions
+          SET input_audio_seconds  = input_audio_seconds + $2,
+              output_audio_seconds = output_audio_seconds + $3
+        WHERE id = $1`, [sessionId, learnerSecs, coachSecs]);
+
+    let audio = null;
+    try { audio = await spanishSynthesize(env, replyText, cleanText(result.emphasis_word, 60)); }
+    catch (e) { console.error('TTS error', e); }
+
+    return json(request, {
+      reply_text: replyText,
+      audio_b64:  audio,             // null => browser shows text only
+      turn_index: turnIndex,
+      phase:      phase.key,
+      phase_name: phase.name,
+      elapsed_seconds: Math.round(elapsed),
+      corrected:  iv && iv.intervention_type !== 'ignore' ? iv.target_form || null : null,
+    });
+  });
+}
+
+// Deterministic skill EMA — the model proposes, SQL decides.
+async function applySpanishSkillEvidence(env, userId, iv) {
+  const skillKey = cleanKey(iv.skill_key);
+  if (!skillKey) return;
+
+  const success    = iv.learner_repeated_correctly === true ? 1 : 0;
+  const recurrence = ['guided_repair', 'explicit_correction'].includes(iv.intervention_type) ? 1 : 0;
+
+  const cur = await query(env,
+    `SELECT estimate, recurrence_count FROM spanish_skills WHERE user_id = $1 AND skill_key = $2`,
+    [userId, skillKey]);
+  const current   = cur.rows?.[0] || { estimate: 0.20, recurrence_count: 0 };
+  const weight    = clampInt(iv.importance, 1, 5) / 5;
+  const estimate  = Math.max(0.02, Math.min(0.98,
+    Number(current.estimate) * 0.88 + success * 0.14 * weight - recurrence * 0.08 * weight));
+  const recurrences = Number(current.recurrence_count) + recurrence;
+
+  await query(env,
+    `INSERT INTO spanish_skills
+       (user_id, skill_key, display_name, skill_type, evidence_count, success_count,
+        recurrence_count, estimate, last_seen_at, next_review_at)
+     VALUES ($1,$2,$3,$4,1,$5,$6,$7,NOW(),$8)
+     ON CONFLICT (user_id, skill_key) DO UPDATE SET
+       evidence_count   = spanish_skills.evidence_count + 1,
+       success_count    = spanish_skills.success_count + EXCLUDED.success_count,
+       recurrence_count = spanish_skills.recurrence_count + EXCLUDED.recurrence_count,
+       estimate         = EXCLUDED.estimate,
+       last_seen_at     = NOW(),
+       next_review_at   = EXCLUDED.next_review_at`,
+    [userId, skillKey,
+     cleanText(iv.display_name, 120) || skillKey.replace(/_/g, ' '),
+     SPANISH_SKILL_TYPES.includes(iv.skill_type) ? iv.skill_type : 'grammar',
+     success, recurrence, estimate, spanishNextReview(estimate, recurrences)]);
+}
+
+// ── Session end + consolidation ────────────────────────────────
+async function handleEndSpanishSession(request, env, sessionId) {
+  return withUser(request, env, async (session) => {
+    const sr = await query(env,
+      `SELECT * FROM spanish_sessions WHERE id = $1 AND user_id = $2`, [sessionId, session.user_id]);
+    const sess = sr.rows?.[0];
+    if (!sess) return err(request, 'Session not found.', 404);
+    if (sess.status === 'completed') {
+      return json(request, { ok: true, summary: sess.summary });
+    }
+
+    const duration = Math.max(0, Math.round((Date.now() - new Date(sess.started_at).getTime()) / 1000));
+
+    const [turnsR, ivR, profileRow] = await Promise.all([
+      query(env, `SELECT speaker, transcript, phase FROM spanish_turns
+                   WHERE session_id = $1 ORDER BY id`, [sessionId]),
+      query(env, `SELECT intervention_type, learner_form, target_form, skill_key, importance
+                    FROM spanish_interventions WHERE session_id = $1 ORDER BY id`, [sessionId]),
+      getSpanishProfile(env, session.user_id),
+    ]);
+
+    const turns  = turnsR.rows || [];
+    const ivs    = ivR.rows || [];
+    const learnerTurns = turns.filter(t => t.speaker === 'learner');
+
+    // Too short to be a real session — close it without spending a consolidation call.
+    if (learnerTurns.length < 2) {
+      await query(env,
+        `UPDATE spanish_sessions SET status = 'abandoned', ended_at = NOW(), duration_seconds = $2
+          WHERE id = $1`, [sessionId, duration]);
+      return json(request, { ok: true, too_short: true });
+    }
+
+    const aggregates = {
+      duration_seconds: duration,
+      learner_turns:    learnerTurns.length,
+      coach_turns:      turns.length - learnerTurns.length,
+      learner_words:    learnerTurns.reduce((n, t) => n + t.transcript.split(/\s+/).length, 0),
+      interventions:    ivs.length,
+      by_type:          ivs.reduce((m, i) => (m[i.intervention_type] = (m[i.intervention_type] || 0) + 1, m), {}),
+      skills_touched:   [...new Set(ivs.map(i => i.skill_key).filter(Boolean))],
+    };
+
+    const transcript = turns.map(t =>
+      `${t.speaker === 'coach' ? 'COACH' : 'LEARNER'}: ${t.transcript}`).join('\n').slice(0, 24000);
+
+    const topicsR = await query(env,
+      `SELECT key, title, unit_order FROM spanish_topics WHERE enabled ORDER BY unit_order`, []);
+
+    let consolidated = null;
+    try {
+      consolidated = await callClaude(env, {
+        model:     SPANISH_CONSOLIDATE_MODEL,
+        maxTokens: 2000,
+        system:
+`You review a finished Spanish conversation session for one child and plan the next one.
+
+Write the parent summary using ONLY the aggregates and transcript supplied. Never invent numbers,
+diagnoses, or proficiency claims. Be concrete and warm; name what actually happened.
+
+The next lesson plan should:
+- carry forward specific, personal callback hooks from THIS conversation (things the child said)
+- keep working any error that recurred, and interleave due review words with new ones
+- advance through the curriculum when the current unit is going well
+- stay small: 4-6 target words, 1-2 structures.
+
+Current learner profile summary: ${profileRow.profile_summary || '(none yet)'}
+Curriculum units in order: ${(topicsR.rows || []).map(t => `${t.unit_order}. ${t.key}`).join(', ')}
+This session used unit: ${sess.topic_key || '(none)'} and scenario: ${sess.scenario_key}`,
+        content:
+`AGGREGATES (authoritative)\n${JSON.stringify(aggregates, null, 2)}\n\n` +
+`INTERVENTIONS\n${ivs.map(i => `${i.intervention_type}: "${i.learner_form || ''}" -> "${i.target_form || ''}" [${i.skill_key || ''}]`).join('\n') || '(none)'}\n\n` +
+`TRANSCRIPT\n${transcript}`,
+        tool: SPANISH_CONSOLIDATE_TOOL,
+      });
+    } catch (e) {
+      console.error('Consolidation failed', e);
+    }
+
+    const summary = {
+      aggregates,
+      parent_summary:      consolidated?.parent_summary || '',
+      learner_summary:     consolidated?.learner_summary || '¡Buen trabajo hoy!',
+      phrases_to_remember: (consolidated?.phrases_to_remember || []).slice(0, 3),
+    };
+
+    await query(env,
+      `UPDATE spanish_sessions
+          SET status = 'completed', ended_at = NOW(), duration_seconds = $2, summary = $3
+        WHERE id = $1`, [sessionId, duration, JSON.stringify(summary)]);
+
+    await query(env,
+      `UPDATE spanish_profiles
+          SET total_seconds  = total_seconds + $2,
+              total_sessions = total_sessions + 1,
+              profile_summary = COALESCE($3, profile_summary),
+              updated_at = NOW()
+        WHERE user_id = $1`,
+      [session.user_id, duration, cleanText(consolidated?.profile_summary, 2000)]);
+
+    if (consolidated?.next_lesson_plan) {
+      await query(env,
+        `INSERT INTO spanish_lesson_plans (user_id, sequence, plan)
+         VALUES ($1, COALESCE((SELECT MAX(sequence) FROM spanish_lesson_plans WHERE user_id = $1), 0) + 1, $2)
+         ON CONFLICT (user_id, sequence) DO NOTHING`,
+        [session.user_id, JSON.stringify(consolidated.next_lesson_plan)]);
+    }
+
+    // Honour transcript retention.
+    if (profileRow.transcript_retention === 'none') {
+      await query(env, `DELETE FROM spanish_turns WHERE session_id = $1`, [sessionId]);
+    }
+
+    return json(request, { ok: true, summary });
+  });
+}
+
+// ── Profile / streak ───────────────────────────────────────────
+async function spanishStreak(env, userId) {
+  const r = await query(env,
+    `SELECT started_at::date AS d, SUM(duration_seconds) AS secs
+       FROM spanish_sessions
+      WHERE user_id = $1 AND status = 'completed'
+      GROUP BY 1 ORDER BY 1 DESC LIMIT 90`, [userId]);
+  const days = (r.rows || []).map(x => ({ d: String(x.d).slice(0, 10), secs: Number(x.secs || 0) }));
+  const set  = new Set(days.map(x => x.d));
+
+  let streak = 0;
+  const cursor = new Date();
+  // Today not yet practised doesn't break a streak until tomorrow.
+  if (!set.has(cursor.toISOString().slice(0, 10))) cursor.setDate(cursor.getDate() - 1);
+  for (;;) {
+    if (!set.has(cursor.toISOString().slice(0, 10))) break;
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  const today = days.find(x => x.d === new Date().toISOString().slice(0, 10));
+  const weekAgo = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+  return {
+    streak_days:   streak,
+    minutes_today: Math.round((today?.secs || 0) / 60),
+    minutes_week:  Math.round(days.filter(x => x.d >= weekAgo).reduce((n, x) => n + x.secs, 0) / 60),
+    recent_days:   days.slice(0, 14),
+  };
+}
+
+async function handleGetSpanishProfile(request, env) {
+  return withUser(request, env, async (session) => {
+    const [profile, scenariosR, streak, planR] = await Promise.all([
+      getSpanishProfile(env, session.user_id),
+      query(env, `SELECT key, title, description FROM spanish_scenarios
+                   WHERE enabled ORDER BY sort_order`, []),
+      spanishStreak(env, session.user_id),
+      query(env, `SELECT plan FROM spanish_lesson_plans
+                   WHERE user_id = $1 AND used_by_session IS NULL
+                   ORDER BY sequence DESC LIMIT 1`, [session.user_id]),
+    ]);
+
+    const lastR = await query(env,
+      `SELECT summary FROM spanish_sessions
+        WHERE user_id = $1 AND status = 'completed'
+        ORDER BY started_at DESC LIMIT 1`, [session.user_id]);
+
+    return json(request, {
+      profile: {
+        comprehension_level: profile.comprehension_level,
+        production_level:    profile.production_level,
+        correction_intensity: profile.correction_intensity,
+        english_support:     profile.english_support,
+        session_minutes:     Number(profile.session_minutes),
+        weekly_minutes_goal: Number(profile.weekly_minutes_goal),
+        show_direct_button:  profile.show_direct_button,
+        total_sessions:      Number(profile.total_sessions),
+      },
+      scenarios: scenariosR.rows || [],
+      streak,
+      next_plan: planR.rows?.[0]?.plan || null,
+      last_summary: lastR.rows?.[0]?.summary || null,
+    });
+  });
+}
+
+async function handlePatchSpanishProfile(request, env) {
+  return withUser(request, env, async (session) => {
+    const body = await request.json().catch(() => ({}));
+    await getSpanishProfile(env, session.user_id);   // ensure the row exists
+
+    const sets = [], params = [session.user_id];
+    if (['immersion', 'as_needed', 'bilingual'].includes(body.english_support)) {
+      params.push(body.english_support); sets.push(`english_support = $${params.length}`);
+    }
+    if (Array.isArray(body.interests)) {
+      params.push(JSON.stringify(body.interests.slice(0, 20).map(s => String(s).slice(0, 60))));
+      sets.push(`interests = $${params.length}::jsonb`);
+    }
+    if (!sets.length) return json(request, { ok: true });
+
+    await query(env,
+      `UPDATE spanish_profiles SET ${sets.join(', ')}, updated_at = NOW() WHERE user_id = $1`, params);
+    return json(request, { ok: true });
+  });
+}
+
+// ── Parent report and settings ─────────────────────────────────
+async function spanishAssertSameFamily(env, parentId, studentId) {
+  const me = await getMembership(env, parentId);
+  if (!me || me.role !== 'parent') return 'Only a parent can do that.';
+  const them = await getMembership(env, studentId);
+  if (!them || them.id !== me.id) return 'That learner is not in your family.';
+  return null;
+}
+
+async function handleSpanishReport(request, env, studentId) {
+  return withUser(request, env, async (session) => {
+    const problem = await spanishAssertSameFamily(env, session.user_id, studentId);
+    if (problem) return err(request, problem, 403);
+
+    const [profile, streak, sessionsR, skillsR, vocabR, monthR] = await Promise.all([
+      getSpanishProfile(env, studentId),
+      spanishStreak(env, studentId),
+      query(env, `SELECT id, started_at, duration_seconds, scenario_key, topic_key, summary
+                    FROM spanish_sessions
+                   WHERE user_id = $1 AND status = 'completed'
+                   ORDER BY started_at DESC LIMIT 14`, [studentId]),
+      query(env, `SELECT skill_key, display_name, estimate, evidence_count, recurrence_count
+                    FROM spanish_skills WHERE user_id = $1
+                   ORDER BY recurrence_count DESC, estimate ASC LIMIT 15`, [studentId]),
+      query(env, `SELECT COUNT(*) AS total,
+                         COUNT(*) FILTER (WHERE produced_correctly > 0) AS produced
+                    FROM spanish_vocabulary WHERE user_id = $1`, [studentId]),
+      query(env, `SELECT COALESCE(SUM(input_audio_seconds + output_audio_seconds),0) AS secs
+                    FROM spanish_sessions
+                   WHERE user_id = $1 AND started_at >= date_trunc('month', NOW())`, [studentId]),
+    ]);
+
+    const monthMinutes = Number(monthR.rows?.[0]?.secs || 0) / 60;
+    return json(request, {
+      settings: {
+        correction_intensity: profile.correction_intensity,
+        english_support:      profile.english_support,
+        session_minutes:      Number(profile.session_minutes),
+        daily_session_cap:    Number(profile.daily_session_cap),
+        weekly_minutes_goal:  Number(profile.weekly_minutes_goal),
+        transcript_retention: profile.transcript_retention,
+        show_direct_button:   profile.show_direct_button,
+      },
+      streak,
+      totals: {
+        sessions: Number(profile.total_sessions),
+        minutes:  Math.round(Number(profile.total_seconds) / 60),
+        vocabulary_known:    Number(vocabR.rows?.[0]?.total || 0),
+        vocabulary_produced: Number(vocabR.rows?.[0]?.produced || 0),
+      },
+      month_audio_minutes: Math.round(monthMinutes),
+      // Rough guide only: Claude turn cost + TTS at ~$0.015/min of coach speech.
+      month_cost_estimate: Number((monthMinutes * 0.028).toFixed(2)),
+      recent_sessions: sessionsR.rows || [],
+      skills: skillsR.rows || [],
+    });
+  });
+}
+
+async function handlePatchSpanishSettings(request, env, studentId) {
+  return withUser(request, env, async (session) => {
+    const problem = await spanishAssertSameFamily(env, session.user_id, studentId);
+    if (problem) return err(request, problem, 403);
+
+    const body = await request.json().catch(() => ({}));
+    await getSpanishProfile(env, studentId);
+
+    const sets = [], params = [studentId];
+    const push = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    if (['gentle', 'balanced', 'active'].includes(body.correction_intensity))
+      push('correction_intensity', body.correction_intensity);
+    if (['immersion', 'as_needed', 'bilingual'].includes(body.english_support))
+      push('english_support', body.english_support);
+    if ([15, 20, 30].includes(Number(body.session_minutes)))
+      push('session_minutes', Number(body.session_minutes));
+    if (Number.isInteger(Number(body.daily_session_cap)))
+      push('daily_session_cap', clampInt(body.daily_session_cap, 1, 10));
+    if (Number.isInteger(Number(body.weekly_minutes_goal)))
+      push('weekly_minutes_goal', clampInt(body.weekly_minutes_goal, 0, 2000));
+    if (['none', 'days_30', 'retain'].includes(body.transcript_retention))
+      push('transcript_retention', body.transcript_retention);
+    if (typeof body.show_direct_button === 'boolean')
+      push('show_direct_button', body.show_direct_button);
+
+    if (!sets.length) return json(request, { ok: true });
+    await query(env,
+      `UPDATE spanish_profiles SET ${sets.join(', ')}, updated_at = NOW() WHERE user_id = $1`, params);
+    return json(request, { ok: true });
+  });
+}
+
 // ── Router ─────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -1373,6 +2327,22 @@ export default {
 
       const resultsMatch = path.match(/^\/essays\/assignments\/([0-9a-fA-F-]{36})\/essay\/([0-9a-fA-F-]{36})\/results$/);
       if (resultsMatch && method === 'GET') return await handleGetEssayResults(request, env, resultsMatch[1], resultsMatch[2]);
+
+      if (path === '/spanish/session' && method === 'POST') return await handleCreateSpanishSession(request, env);
+      if (path === '/spanish/profile' && method === 'GET')   return await handleGetSpanishProfile(request, env);
+      if (path === '/spanish/profile' && method === 'PATCH') return await handlePatchSpanishProfile(request, env);
+
+      const spTurnMatch = path.match(/^\/spanish\/session\/([0-9a-fA-F-]{36})\/turn$/);
+      if (spTurnMatch && method === 'POST') return await handleSpanishTurn(request, env, spTurnMatch[1]);
+
+      const spEndMatch = path.match(/^\/spanish\/session\/([0-9a-fA-F-]{36})\/end$/);
+      if (spEndMatch && method === 'POST') return await handleEndSpanishSession(request, env, spEndMatch[1]);
+
+      const spReportMatch = path.match(/^\/spanish\/reports\/([0-9a-fA-F-]{36})$/);
+      if (spReportMatch && method === 'GET') return await handleSpanishReport(request, env, spReportMatch[1]);
+
+      const spSettingsMatch = path.match(/^\/spanish\/settings\/([0-9a-fA-F-]{36})$/);
+      if (spSettingsMatch && method === 'PATCH') return await handlePatchSpanishSettings(request, env, spSettingsMatch[1]);
 
       return err(request, 'Not found', 404);
     } catch (e) {

@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#04070f">
+<title>Spanish Coach — Cluff Learning Systems</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23050912'/><circle cx='16' cy='16' r='8' fill='none' stroke='%23f5a524' stroke-width='2.5'/><circle cx='16' cy='16' r='2.5' fill='%23f5a524'/></svg>">
+<style>
+/* ══════════════════════════════════════════════════════════════
+   SPANISH COACH — shares the bridge design system with index.html
+══════════════════════════════════════════════════════════════ */
+:root{
+  --void:#04070f; --deep:#070c18; --panel:rgba(9,16,31,.74); --panel-solid:#0a1120; --raise:rgba(19,32,56,.6);
+  --line:rgba(79,209,224,.16); --line-mid:rgba(79,209,224,.30); --line-hot:rgba(79,209,224,.55);
+  --text:#dce8f6; --text-bright:#f2f8ff; --dim:#7b95b4; --faint:#4e6485;
+  --cyan:#4fd1e0; --amber:#f5a524; --violet:#a78bfa; --green:#34d399; --rose:#fb7185;
+  --font-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono',Consolas,'Liberation Mono',monospace;
+  --r:4px; --ease:cubic-bezier(.22,.9,.28,1);
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;min-height:100%;background:var(--void);color:var(--text);font-family:var(--font-ui);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+#starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+.ambient{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(900px 620px at 12% -8%, rgba(245,165,36,.12), transparent 62%),
+             radial-gradient(760px 540px at 92% 4%,  rgba(79,209,224,.10), transparent 60%),
+             radial-gradient(1100px 700px at 50% 118%, rgba(167,139,250,.07), transparent 65%);}
+.vignette{position:fixed;inset:0;z-index:1;pointer-events:none;box-shadow:inset 0 0 220px 40px rgba(0,0,0,.85)}
+
+.panel{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.panel::before,.panel::after{content:'';position:absolute;width:16px;height:16px;pointer-events:none;border-color:var(--line-hot);border-style:solid;border-width:0}
+.panel::before{top:-1px;left:-1px;border-top-width:1px;border-left-width:1px}
+.panel::after{bottom:-1px;right:-1px;border-bottom-width:1px;border-right-width:1px}
+
+.label{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--faint)}
+.rule{height:1px;background:linear-gradient(90deg,var(--line-mid),transparent);border:0;margin:0}
+.led{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber);animation:pulse 2.4s var(--ease) infinite}
+.led.dim{background:var(--faint);box-shadow:none;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.32}}
+
+.btn{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;
+  padding:.72rem 1.35rem;border-radius:var(--r);border:1px solid var(--line-mid);
+  background:linear-gradient(180deg,rgba(79,209,224,.14),rgba(79,209,224,.05));color:var(--cyan);transition:all .18s var(--ease);position:relative}
+.btn:hover:not(:disabled){border-color:var(--line-hot);background:linear-gradient(180deg,rgba(79,209,224,.24),rgba(79,209,224,.09));color:var(--text-bright);box-shadow:0 0 20px -6px rgba(79,209,224,.55)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--dim)}
+.btn.ghost:hover:not(:disabled){border-color:var(--line-mid);color:var(--text);box-shadow:none;background:rgba(79,209,224,.05)}
+.btn.sm{padding:.44rem .85rem;font-size:.63rem;letter-spacing:.15em}
+.btn.gold{color:var(--amber);border-color:rgba(245,165,36,.35);background:rgba(245,165,36,.08)}
+.btn.gold:hover:not(:disabled){border-color:rgba(245,165,36,.65);color:#ffe3ad;box-shadow:0 0 20px -6px rgba(245,165,36,.5)}
+.btn.danger{color:var(--rose);border-color:rgba(251,113,133,.3);background:rgba(251,113,133,.07)}
+.btn.danger:hover:not(:disabled){border-color:rgba(251,113,133,.6);color:#ffd7dd}
+a.btn{display:inline-block;text-decoration:none}
+.backBtn{white-space:nowrap}
+
+.err{font-size:.82rem;color:#ffc2cb;background:rgba(251,113,133,.09);border:1px solid rgba(251,113,133,.28);border-left-width:2px;border-radius:var(--r);padding:.6rem .8rem;margin-bottom:1rem}
+.note{font-size:.82rem;color:#ffe3ad;background:rgba(245,165,36,.08);border:1px solid rgba(245,165,36,.26);border-left-width:2px;border-radius:var(--r);padding:.6rem .8rem;margin-bottom:1rem}
+
+#authGate{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:var(--void);color:var(--dim);font-family:var(--font-mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase}
+
+#app{position:relative;z-index:2;min-height:100dvh;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:1.25rem;padding:.85rem clamp(1rem,4vw,2.5rem);
+  background:rgba(5,9,18,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
+.mark{display:flex;align-items:center;gap:.7rem;text-decoration:none;color:inherit}
+.mark svg{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 8px rgba(245,165,36,.4))}
+.mark-text{min-width:0;line-height:1.25}
+.mark-name{display:block;font-size:.84rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-bright)}
+.mark-sub{display:block;font-family:var(--font-mono);font-size:.53rem;letter-spacing:.26em;color:var(--amber);text-transform:uppercase;margin-top:.15rem}
+.topbar-spacer{flex:1}
+.userchip{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.08em;color:var(--dim)}
+.userchip b{color:var(--amber);font-weight:600}
+
+main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.6rem) clamp(1rem,4vw,2.5rem) 3rem}
+
+.hero{margin-bottom:1.8rem}
+.hero h1{font-size:clamp(1.6rem,4vw,2.3rem);font-weight:600;letter-spacing:-.015em;line-height:1.15;margin:.6rem 0 .4rem;color:var(--text-bright)}
+.hero h1 .accent{background:linear-gradient(96deg,var(--amber),var(--rose));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{margin:0;max-width:60ch;color:var(--dim);font-size:.95rem}
+
+.screen{display:none}
+.screen.active{display:block;animation:screenIn .3s var(--ease)}
+@keyframes screenIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ── streak ── */
+.streak-row{display:flex;gap:.8rem;flex-wrap:wrap;margin-bottom:1.6rem}
+.stat{flex:1;min-width:120px;padding:.9rem 1rem}
+.stat .v{font-family:var(--font-mono);font-size:1.5rem;font-weight:600;color:var(--amber);line-height:1.1}
+.stat .k{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);margin-top:.3rem}
+.daybar{display:flex;gap:3px;margin-top:.55rem}
+.daybar i{flex:1;height:5px;border-radius:1px;background:rgba(255,255,255,.07)}
+.daybar i.on{background:var(--amber);box-shadow:0 0 6px rgba(245,165,36,.6)}
+
+/* ── plan card ── */
+.plan{padding:1.3rem 1.4rem;margin-bottom:1.6rem}
+.plan h3{margin:.5rem 0 .7rem;font-size:1.05rem;font-weight:600;color:var(--text-bright)}
+.plan .words{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.7rem}
+.word{font-family:var(--font-mono);font-size:.72rem;padding:.3rem .6rem;border-radius:2px;
+  border:1px solid rgba(245,165,36,.3);color:#ffe3ad;background:rgba(245,165,36,.07)}
+.plan .hook{font-size:.86rem;color:var(--dim);margin:.35rem 0 0;padding-left:1rem;position:relative}
+.plan .hook::before{content:'›';position:absolute;left:.25rem;color:var(--amber)}
+
+.startWrap{text-align:center;padding:2rem 0 1rem}
+.bigStart{font-family:var(--font-mono);font-size:1rem;letter-spacing:.22em;text-transform:uppercase;
+  padding:1.35rem 3.5rem;border-radius:var(--r);cursor:pointer;
+  border:1px solid rgba(245,165,36,.5);color:#ffe3ad;
+  background:linear-gradient(180deg,rgba(245,165,36,.22),rgba(245,165,36,.07));
+  transition:all .2s var(--ease)}
+.bigStart:hover:not(:disabled){border-color:rgba(245,165,36,.9);box-shadow:0 0 40px -8px rgba(245,165,36,.7);transform:translateY(-1px)}
+.bigStart:disabled{opacity:.45;cursor:not-allowed}
+
+/* ── live session ── */
+.phasebar{display:flex;gap:4px;margin-bottom:1.2rem}
+.phasebar .ph{flex:1;text-align:center}
+.phasebar .ph i{display:block;height:4px;border-radius:1px;background:rgba(255,255,255,.08);margin-bottom:.4rem;transition:background .3s var(--ease)}
+.phasebar .ph.done i{background:rgba(245,165,36,.45)}
+.phasebar .ph.now i{background:var(--amber);box-shadow:0 0 10px rgba(245,165,36,.8)}
+.phasebar .ph span{font-family:var(--font-mono);font-size:.52rem;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.phasebar .ph.now span{color:var(--amber)}
+
+.stage{padding:1.6rem 1.5rem;text-align:center;margin-bottom:1.2rem;min-height:210px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1rem}
+.state{font-family:var(--font-mono);font-size:.64rem;letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
+.state.listening{color:var(--green)} .state.thinking{color:var(--violet)} .state.speaking{color:var(--amber)}
+.coachline{font-size:1.22rem;line-height:1.5;color:var(--text-bright);max-width:34ch;min-height:2.6em}
+.coachline .em{color:var(--amber);font-weight:600}
+.youline{font-size:.88rem;color:var(--dim);font-style:italic;min-height:1.3em}
+
+.orb{width:96px;height:96px;border-radius:50%;border:2px solid rgba(245,165,36,.35);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
+  background:radial-gradient(circle at 50% 40%, rgba(245,165,36,.20), rgba(245,165,36,.04));
+  transition:all .18s var(--ease);touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.orb:hover:not(.off){border-color:rgba(245,165,36,.7)}
+.orb.rec{border-color:var(--green);background:radial-gradient(circle at 50% 40%, rgba(52,211,153,.30), rgba(52,211,153,.06));
+  box-shadow:0 0 40px -6px rgba(52,211,153,.75);animation:breathe 1.6s var(--ease) infinite}
+.orb.off{opacity:.35;cursor:not-allowed}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.orb svg{width:38px;height:38px;fill:none;stroke:currentColor;stroke-width:1.6;color:var(--amber)}
+.orb.rec svg{color:var(--green)}
+.orbhint{font-family:var(--font-mono);font-size:.58rem;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+
+.timer{font-family:var(--font-mono);font-size:.8rem;color:var(--dim);letter-spacing:.08em}
+.timer b{color:var(--amber);font-weight:600}
+
+.controls{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.2rem}
+
+.transcript{max-height:230px;overflow-y:auto;padding:1rem 1.2rem;font-size:.86rem}
+.transcript .t{margin-bottom:.6rem;line-height:1.45}
+.transcript .t.c{color:var(--text-bright)} .transcript .t.l{color:var(--dim)}
+.transcript .t b{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);display:block;margin-bottom:.1rem}
+
+/* ── summary ── */
+.sum{padding:1.6rem 1.5rem;margin-bottom:1.2rem}
+.sum h2{margin:.4rem 0 .8rem;font-size:1.3rem;font-weight:600;color:var(--text-bright)}
+.sum .phrases{display:flex;flex-direction:column;gap:.5rem;margin:1rem 0}
+.sum .phrase{font-size:1rem;color:#ffe3ad;padding:.6rem .9rem;border-radius:var(--r);
+  border:1px solid rgba(245,165,36,.25);background:rgba(245,165,36,.06)}
+
+#toast{position:fixed;left:50%;bottom:2rem;transform:translate(-50%,140%);z-index:300;
+  padding:.75rem 1.3rem;border-radius:var(--r);background:var(--panel-solid);border:1px solid var(--line-mid);
+  color:var(--text-bright);font-size:.85rem;transition:transform .3s var(--ease);max-width:90vw}
+#toast.show{transform:translate(-50%,0)}
+#toast.bad{border-color:rgba(251,113,133,.5);color:#ffc2cb}
+
+@media (max-width:560px){
+  .topbar{gap:.6rem;padding:.7rem 1rem}
+  .mark-text,.userchip{display:none}
+  .coachline{font-size:1.06rem}
+  .stat{min-width:calc(50% - .4rem)}
+}
+</style>
+</head>
+<body>
+
+<canvas id="starfield"></canvas>
+<div class="ambient"></div>
+<div class="vignette"></div>
+
+<div id="authGate">Verifying clearance…</div>
+
+<div id="app" style="display:none">
+  <header class="topbar">
+    <a class="mark" href="index.html">
+      <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M24 3 L44 43 L24 34 L4 43 Z" fill="url(#gtop)"/>
+        <path d="M24 12 L36 38 L24 32 L12 38 Z" fill="#04070f"/>
+        <circle cx="24" cy="27" r="3.2" fill="#f5a524"/>
+        <defs><linearGradient id="gtop" x1="4" y1="3" x2="44" y2="43">
+          <stop stop-color="#f5a524"/><stop offset="1" stop-color="#fb7185"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="mark-text"><span class="mark-name">Cluff Learning</span><span class="mark-sub">Back to Bridge</span></span>
+    </a>
+    <a class="btn ghost sm backBtn" href="index.html">← Bridge</a>
+    <div class="topbar-spacer"></div>
+    <span class="userchip">Signed in as <b id="userChipName">—</b></span>
+    <button id="btnSignOut" class="btn ghost sm">Sign out</button>
+  </header>
+
+  <main>
+    <!-- ══ HOME ══ -->
+    <section id="screen-home" class="screen active">
+      <div class="hero">
+        <div class="label"><i class="led"></i> Spanish Coach</div>
+        <h1>¡Hola, <span class="accent" id="heroName">amigo</span>!</h1>
+        <p id="heroSub">Loading…</p>
+      </div>
+
+      <div id="errHome" class="err" hidden></div>
+      <div id="noteHome" class="note" hidden></div>
+
+      <div class="streak-row">
+        <div class="panel stat">
+          <div class="v" id="statStreak">0</div>
+          <div class="k">Day streak</div>
+          <div class="daybar" id="dayBar"></div>
+        </div>
+        <div class="panel stat">
+          <div class="v" id="statToday">0<span style="font-size:.9rem;color:var(--faint)">m</span></div>
+          <div class="k">Today</div>
+        </div>
+        <div class="panel stat">
+          <div class="v" id="statWeek">0<span style="font-size:.9rem;color:var(--faint)">m</span></div>
+          <div class="k">This week</div>
+        </div>
+      </div>
+
+      <div class="panel plan" id="planCard">
+        <div class="label">Today's plan</div>
+        <h3 id="planTitle">Conversación libre</h3>
+        <div id="planHooks"></div>
+        <div class="words" id="planWords"></div>
+      </div>
+
+      <div class="startWrap">
+        <button id="btnStart" class="bigStart">▶ Empezar</button>
+        <p style="margin:.9rem 0 0;color:var(--faint);font-size:.8rem" id="startHint">15 minutes of Spanish</p>
+      </div>
+
+      <div id="lastSummary"></div>
+    </section>
+
+    <!-- ══ LIVE ══ -->
+    <section id="screen-live" class="screen">
+      <div class="phasebar" id="phaseBar"></div>
+
+      <div class="panel stage">
+        <div class="state" id="stateLabel">Connecting…</div>
+        <div class="coachline" id="coachLine">…</div>
+        <div class="orb off" id="orb" role="button" tabindex="0" aria-label="Hold to speak">
+          <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+        </div>
+        <div class="orbhint" id="orbHint">Hold to talk</div>
+        <div class="youline" id="youLine"></div>
+        <div class="timer">Time <b id="timeLeft">15:00</b></div>
+      </div>
+
+      <div class="controls">
+        <button class="btn ghost sm" data-ctl="slower">🐢 Más despacio</button>
+        <button class="btn ghost sm" data-ctl="repeat">↻ Repítelo</button>
+        <button class="btn ghost sm" data-ctl="meaning">? ¿Qué significa?</button>
+        <button class="btn ghost sm" data-ctl="direct" id="btnDirect">✎ Corrígeme</button>
+        <button class="btn danger sm" id="btnEnd">■ Terminar</button>
+      </div>
+
+      <div class="panel transcript" id="transcript" hidden></div>
+      <div style="text-align:center">
+        <button class="btn ghost sm" id="btnToggleTranscript">Show transcript</button>
+      </div>
+    </section>
+
+    <!-- ══ SUMMARY ══ -->
+    <section id="screen-summary" class="screen">
+      <div class="panel sum">
+        <div class="label">Sesión terminada</div>
+        <h2 id="sumTitle">¡Buen trabajo!</h2>
+        <p id="sumText" style="color:var(--dim)"></p>
+        <div class="phrases" id="sumPhrases"></div>
+        <div id="sumStats" style="font-family:var(--font-mono);font-size:.72rem;color:var(--faint);letter-spacing:.1em"></div>
+      </div>
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+        <button class="btn gold" id="btnAgain">Otra sesión</button>
+        <a class="btn ghost" href="index.html">← Bridge</a>
+      </div>
+    </section>
+  </main>
+</div>
+
+<audio id="coachAudio" preload="auto"></audio>
+<div id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   CONFIG + API
+══════════════════════════════════════════════════════════════ */
+const API_URL='https://cluff-learning-api.kylecluff.workers.dev';
+const TOKEN_KEY='cls_jwt';
+let ME=null;
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(method,path,body){
+  const opts={ method, headers:{ 'Content-Type':'application/json' } };
+  const token=localStorage.getItem(TOKEN_KEY);
+  if(token) opts.headers['Authorization']='Bearer '+token;
+  if(body!==undefined) opts.body=JSON.stringify(body);
+  try{
+    const res=await fetch(API_URL+path,opts);
+    const text=await res.text();
+    let data={};
+    try{ data=text?JSON.parse(text):{}; }catch(e){ data={ error:text||('HTTP '+res.status) }; }
+    if(!res.ok) return { error:data.error||('HTTP '+res.status), status:res.status };
+    return data;
+  }catch(e){ return { error:e.message||'Network error' }; }
+}
+
+let toastTimer;
+function toast(msg,bad){
+  const el=$('toast'); el.textContent=msg; el.classList.toggle('bad',!!bad); el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),3600);
+}
+function showScreen(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  $('screen-'+name).classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Starfield (matches the homepage)
+══════════════════════════════════════════════════════════════ */
+(function starfield(){
+  const canvas=$('starfield'); const ctx=canvas.getContext('2d');
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let stars=[], w=0, h=0, dpr=1;
+  function resize(){
+    dpr=Math.min(devicePixelRatio||1,2); w=innerWidth; h=innerHeight;
+    if(!w||!h){ stars=[]; return; }
+    canvas.width=w*dpr; canvas.height=h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    const count=Math.round((w*h)/13000);
+    stars=Array.from({length:count},()=>({ x:Math.random()*w,y:Math.random()*h,r:Math.random()*1.1+.25,
+      a:Math.random()*.5+.12,v:Math.random()*.02+.004,p:Math.random()*Math.PI*2 }));
+  }
+  function draw(t){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      const tw=reduce?1:.68+.32*Math.sin(t/900+s.p);
+      ctx.globalAlpha=s.a*tw; ctx.fillStyle=s.r>1.0?'#f5c97a':'#dce8f6';
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+      if(!reduce){ s.y-=s.v; if(s.y<-2){ s.y=h+2; s.x=Math.random()*w; } }
+    }
+    ctx.globalAlpha=1; requestAnimationFrame(draw);
+  }
+  addEventListener('resize',resize,{passive:true}); resize(); requestAnimationFrame(draw);
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   Speech recognition (Web Speech API)
+══════════════════════════════════════════════════════════════ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const SR_OK = !!SR;
+
+let recog=null, recActive=false, recResolve=null, recFinal='', recConf=null, recStart=0;
+
+function buildRecognizer(){
+  const r=new SR();
+  r.lang='es-US';
+  r.continuous=true;
+  r.interimResults=true;
+  r.maxAlternatives=1;
+
+  r.onresult=e=>{
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const res=e.results[i];
+      if(res.isFinal){
+        recFinal+=(recFinal?' ':'')+res[0].transcript.trim();
+        if(typeof res[0].confidence==='number' && res[0].confidence>0) recConf=res[0].confidence;
+      } else {
+        interim+=res[0].transcript;
+      }
+    }
+    $('youLine').textContent=(recFinal+' '+interim).trim();
+  };
+  r.onerror=e=>{
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){
+      toast('Microphone permission is blocked. Allow it in your browser settings.',true);
+    } else if(e.error!=='no-speech' && e.error!=='aborted'){
+      console.warn('speech error',e.error);
+    }
+  };
+  r.onend=()=>{
+    recActive=false;
+    if(recResolve){ const f=recResolve; recResolve=null; f(); }
+  };
+  return r;
+}
+
+function startListening(){
+  if(!SR_OK||recActive) return;
+  recFinal=''; recConf=null; recStart=Date.now();
+  $('youLine').textContent='';
+  try{ recog=buildRecognizer(); recog.start(); recActive=true; }
+  catch(e){ console.warn('start failed',e); }
+}
+
+function stopListening(){
+  return new Promise(resolve=>{
+    if(!recActive||!recog){ resolve({text:recFinal.trim(),conf:recConf,secs:0}); return; }
+    recResolve=()=>resolve({
+      text: recFinal.trim(),
+      conf: recConf,
+      secs: Math.min(300,(Date.now()-recStart)/1000)
+    });
+    try{ recog.stop(); }catch(e){ recActive=false; recResolve=null; resolve({text:recFinal.trim(),conf:recConf,secs:0}); }
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Session state
+══════════════════════════════════════════════════════════════ */
+const S={
+  id:null, minutes:15, startedAt:0, turn:0, phases:[], phaseKey:null,
+  busy:false, ended:false, tick:null, transcript:[], showTranscript:false,
+  warned:false
+};
+
+function setState(kind,text){
+  const el=$('stateLabel');
+  el.className='state '+kind;
+  el.textContent=text;
+}
+
+function renderPhases(){
+  const cur=S.phases.findIndex(p=>p.key===S.phaseKey);
+  $('phaseBar').innerHTML=S.phases.map((p,i)=>
+    `<div class="ph ${i<cur?'done':''} ${i===cur?'now':''}"><i></i><span>${esc(p.name)}</span></div>`
+  ).join('');
+}
+
+function pushTranscript(who,text){
+  S.transcript.push({who,text});
+  const el=$('transcript');
+  el.innerHTML=S.transcript.map(t=>
+    `<div class="t ${t.who==='coach'?'c':'l'}"><b>${t.who==='coach'?'Coach':'Tú'}</b>${esc(t.text)}</div>`
+  ).join('');
+  el.scrollTop=el.scrollHeight;
+}
+
+function playAudio(b64){
+  return new Promise(resolve=>{
+    if(!b64){ resolve(); return; }
+    const el=$('coachAudio');
+    el.src='data:audio/mpeg;base64,'+b64;
+    el.onended=resolve;
+    el.onerror=()=>resolve();
+    const p=el.play();
+    if(p&&p.catch) p.catch(()=>resolve());
+  });
+}
+
+function stopAudio(){
+  const el=$('coachAudio');
+  try{ el.pause(); el.currentTime=0; }catch(e){}
+}
+
+function fmtTime(sec){
+  sec=Math.max(0,Math.round(sec));
+  return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
+}
+
+function startTimer(){
+  clearInterval(S.tick);
+  S.tick=setInterval(()=>{
+    const elapsed=(Date.now()-S.startedAt)/1000;
+    const left=S.minutes*60-elapsed;
+    $('timeLeft').textContent=fmtTime(left);
+    if(left<=90&&!S.warned){ S.warned=true; $('timeLeft').style.color='var(--rose)'; }
+    // Grace period, then force-end (Layer 2 of the budget guards).
+    if(left<=-30&&!S.ended){ endSession(true); }
+  },1000);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Turn loop
+══════════════════════════════════════════════════════════════ */
+async function sendTurn({transcript,confidence,seconds,control}){
+  if(S.busy||S.ended) return;
+  S.busy=true;
+  setState('thinking','Pensando…');
+  $('orb').classList.add('off');
+
+  const res=await api('POST',`/spanish/session/${S.id}/turn`,{
+    transcript: transcript||null,
+    confidence: confidence,
+    audio_seconds: seconds,
+    turn_index: S.turn,
+    control: control||null
+  });
+
+  if(res.error){
+    S.busy=false;
+    if(res.status===409){ toast('Time is up — wrapping up.'); endSession(); return; }
+    setState('','');
+    toast(res.error,true);
+    $('orb').classList.remove('off');
+    return;
+  }
+
+  S.turn++;
+  if(res.phase&&res.phase!==S.phaseKey){ S.phaseKey=res.phase; renderPhases(); }
+
+  if(transcript) pushTranscript('learner',transcript);
+  pushTranscript('coach',res.reply_text);
+
+  // Highlight the recast target so the correction is visible as well as audible.
+  let html=esc(res.reply_text);
+  if(res.corrected){
+    const safe=esc(res.corrected).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    html=html.replace(new RegExp('('+safe+')','i'),'<span class="em">$1</span>');
+  }
+  $('coachLine').innerHTML=html;
+  $('youLine').textContent='';
+
+  setState('speaking','Hablando…');
+  await playAudio(res.audio_b64);
+
+  S.busy=false;
+  if(S.ended) return;
+  setState('listening','Tu turno');
+  $('orb').classList.remove('off');
+  $('orbHint').textContent='Hold to talk';
+}
+
+/* ── push-to-talk ── */
+let holding=false;
+
+async function beginHold(){
+  if(S.busy||S.ended||holding||!S.id) return;
+  if(!SR_OK){ toast('This browser cannot listen. Try Chrome or Edge.',true); return; }
+  holding=true;
+  stopAudio();
+  $('orb').classList.add('rec');
+  $('orbHint').textContent='Listening… release when done';
+  setState('listening','Escuchando…');
+  startListening();
+}
+
+async function endHold(){
+  if(!holding) return;
+  holding=false;
+  $('orb').classList.remove('rec');
+  $('orbHint').textContent='…';
+  const {text,conf,secs}=await stopListening();
+  if(!text){
+    setState('listening','Tu turno');
+    $('orbHint').textContent='Hold to talk';
+    return;
+  }
+  await sendTurn({transcript:text,confidence:conf,seconds:secs});
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Start / end
+══════════════════════════════════════════════════════════════ */
+async function startSession(){
+  $('btnStart').disabled=true;
+  $('errHome').hidden=true;
+
+  if(!SR_OK){
+    $('errHome').textContent='This browser does not support speech recognition. Please use Chrome or Edge.';
+    $('errHome').hidden=false;
+    $('btnStart').disabled=false;
+    return;
+  }
+
+  // Ask for the mic up front so permission is settled before the coach speaks.
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    stream.getTracks().forEach(t=>t.stop());
+  }catch(e){
+    $('errHome').textContent='Microphone permission is needed to talk with the coach.';
+    $('errHome').hidden=false;
+    $('btnStart').disabled=false;
+    return;
+  }
+
+  const res=await api('POST','/spanish/session',{scenario_key:'free-talk'});
+  $('btnStart').disabled=false;
+  if(res.error){
+    $('errHome').textContent=res.error;
+    $('errHome').hidden=false;
+    return;
+  }
+
+  Object.assign(S,{
+    id:res.session_id, minutes:res.session_minutes||15,
+    startedAt:Date.now(), turn:0, phases:res.phases||[],
+    phaseKey:(res.phases&&res.phases[0]&&res.phases[0].key)||null,
+    busy:false, ended:false, transcript:[], warned:false
+  });
+  $('btnDirect').hidden = res.show_direct_button===false;
+  $('timeLeft').style.color='';
+  $('transcript').innerHTML='';
+  $('coachLine').textContent='…';
+  $('youLine').textContent='';
+  renderPhases();
+  showScreen('live');
+  startTimer();
+
+  // The coach opens: no learner turn yet.
+  await sendTurn({transcript:null,confidence:null,seconds:0});
+}
+
+async function endSession(auto){
+  if(S.ended) return;
+  S.ended=true;
+  clearInterval(S.tick);
+  stopAudio();
+  if(recActive) { try{ recog.stop(); }catch(e){} }
+  $('orb').classList.add('off');
+  setState('','Terminando…');
+
+  const res=await api('POST',`/spanish/session/${S.id}/end`,{});
+  if(res.error){ toast(res.error,true); showScreen('home'); loadHome(); return; }
+
+  if(res.too_short){
+    toast(auto?'Session ended.':'That was too short to save.');
+    showScreen('home'); loadHome(); return;
+  }
+
+  const sum=res.summary||{};
+  $('sumTitle').textContent='¡Buen trabajo!';
+  $('sumText').textContent=sum.learner_summary||'';
+  $('sumPhrases').innerHTML=(sum.phrases_to_remember||[])
+    .map(p=>`<div class="phrase">${esc(p)}</div>`).join('');
+  const a=sum.aggregates||{};
+  $('sumStats').textContent=
+    `${Math.round((a.duration_seconds||0)/60)} min · ${a.learner_turns||0} turnos · ${a.learner_words||0} palabras`;
+  showScreen('summary');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Home
+══════════════════════════════════════════════════════════════ */
+async function loadHome(){
+  const data=await api('GET','/spanish/profile');
+  if(data.error){
+    $('errHome').textContent=data.error;
+    $('errHome').hidden=false;
+    return;
+  }
+
+  const st=data.streak||{};
+  $('statStreak').textContent=st.streak_days||0;
+  $('statToday').innerHTML=(st.minutes_today||0)+'<span style="font-size:.9rem;color:var(--faint)">m</span>';
+  $('statWeek').innerHTML=(st.minutes_week||0)+'<span style="font-size:.9rem;color:var(--faint)">m</span>';
+
+  // 14-day bar, oldest → newest.
+  const days=(st.recent_days||[]).map(d=>d.d);
+  const bars=[];
+  for(let i=13;i>=0;i--){
+    const d=new Date(Date.now()-i*86400000).toISOString().slice(0,10);
+    bars.push(`<i class="${days.includes(d)?'on':''}"></i>`);
+  }
+  $('dayBar').innerHTML=bars.join('');
+
+  const mins=data.profile?.session_minutes||15;
+  $('startHint').textContent=mins+' minutes of Spanish';
+  $('heroSub').textContent = (st.minutes_today||0)>0
+    ? '¡Ya practicaste hoy! Another session is always welcome.'
+    : 'Ready when you are — about '+mins+' minutes.';
+
+  const plan=data.next_plan;
+  if(plan){
+    $('planTitle').textContent=plan.unit_key
+      ? String(plan.unit_key).replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
+      : 'Conversación libre';
+    $('planHooks').innerHTML=(plan.callback_hooks||[]).slice(0,2)
+      .map(h=>`<p class="hook">${esc(h)}</p>`).join('');
+    $('planWords').innerHTML=(plan.target_words||[]).slice(0,6)
+      .map(w=>`<span class="word">${esc(w)}</span>`).join('');
+  } else {
+    $('planTitle').textContent='Primera conversación';
+    $('planHooks').innerHTML='<p class="hook">The coach will get to know you today.</p>';
+    $('planWords').innerHTML='';
+  }
+
+  const last=data.last_summary;
+  $('lastSummary').innerHTML = last&&last.learner_summary
+    ? `<div class="panel" style="padding:1rem 1.2rem"><div class="label">Last time</div>
+       <p style="margin:.5rem 0 0;color:var(--dim);font-size:.9rem">${esc(last.learner_summary)}</p></div>`
+    : '';
+
+  if(!SR_OK){
+    $('noteHome').textContent='This browser cannot do speech recognition. Spanish Coach needs Chrome or Edge.';
+    $('noteHome').hidden=false;
+    $('btnStart').disabled=true;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Boot
+══════════════════════════════════════════════════════════════ */
+async function boot(){
+  const token=localStorage.getItem(TOKEN_KEY);
+  if(!token){ location.href='index.html'; return; }
+  const me=await api('GET','/auth/me');
+  if(me.error||!me.user){ localStorage.removeItem(TOKEN_KEY); location.href='index.html'; return; }
+  ME=me.user;
+  if(!ME.family){ location.href='index.html'; return; }
+
+  const first=(ME.display_name||ME.email||'amigo').split(/[\s@]/)[0];
+  $('heroName').textContent=first;
+  $('userChipName').textContent=ME.display_name||ME.email;
+
+  $('authGate').style.display='none';
+  $('app').style.display='flex';
+  await loadHome();
+}
+
+/* ── wiring ── */
+$('btnStart').addEventListener('click',startSession);
+$('btnAgain').addEventListener('click',()=>{ showScreen('home'); loadHome(); });
+$('btnEnd').addEventListener('click',()=>{ if(confirm('¿Terminar la sesión?')) endSession(); });
+
+$('btnToggleTranscript').addEventListener('click',()=>{
+  S.showTranscript=!S.showTranscript;
+  $('transcript').hidden=!S.showTranscript;
+  $('btnToggleTranscript').textContent=S.showTranscript?'Hide transcript':'Show transcript';
+});
+
+document.querySelectorAll('[data-ctl]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    if(S.busy||S.ended) return;
+    stopAudio();
+    sendTurn({transcript:null,confidence:null,seconds:0,control:b.dataset.ctl});
+  });
+});
+
+const orb=$('orb');
+orb.addEventListener('mousedown',e=>{ e.preventDefault(); beginHold(); });
+orb.addEventListener('mouseup',endHold);
+orb.addEventListener('mouseleave',()=>{ if(holding) endHold(); });
+orb.addEventListener('touchstart',e=>{ e.preventDefault(); beginHold(); },{passive:false});
+orb.addEventListener('touchend',e=>{ e.preventDefault(); endHold(); },{passive:false});
+orb.addEventListener('keydown',e=>{ if((e.code==='Space'||e.code==='Enter')&&!e.repeat){ e.preventDefault(); beginHold(); } });
+orb.addEventListener('keyup',e=>{ if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); endHold(); } });
+
+// Spacebar anywhere on the live screen is push-to-talk.
+document.addEventListener('keydown',e=>{
+  if(e.code!=='Space'||e.repeat) return;
+  if(!$('screen-live').classList.contains('active')) return;
+  if(e.target.tagName==='BUTTON'||e.target.tagName==='INPUT') return;
+  e.preventDefault(); beginHold();
+});
+document.addEventListener('keyup',e=>{
+  if(e.code!=='Space') return;
+  if(!$('screen-live').classList.contains('active')) return;
+  if(e.target.tagName==='BUTTON'||e.target.tagName==='INPUT') return;
+  e.preventDefault(); endHold();
+});
+
+$('btnSignOut').addEventListener('click',async()=>{
+  await api('POST','/auth/logout');
+  localStorage.removeItem(TOKEN_KEY);
+  location.href='index.html';
+});
+
+// Don't leave a session hanging if the tab closes.
+addEventListener('beforeunload',()=>{
+  if(S.id&&!S.ended){
+    const token=localStorage.getItem(TOKEN_KEY);
+    try{
+      fetch(API_URL+`/spanish/session/${S.id}/end`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body:'{}', keepalive:true
+      });
+    }catch(e){}
+  }
+});
+
+boot();
+</script>
+</body>
+</html>

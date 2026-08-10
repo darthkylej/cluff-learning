@@ -21,11 +21,14 @@ Browser  ──▶  index.html         GitHub Pages
 | --- | --- |
 | `index.html` | Access terminal + bridge homepage. No build step, no dependencies. |
 | `essay-coach.html` | Essay Coach module. |
+| `spanish-coach.html` | Spanish Coach module — voice conversation. |
 | `games/spell-invaders.html` | Spell Invaders module. |
 | `games/fact-runner.html` | Fact Runner module — math facts. |
 | `worker.js` | API: auth, family/crew registry, module registry, per-tool saved state. |
 | `wrangler.toml` | Worker config and the list of required secrets. |
 | `schema.sql` | Postgres schema + seeded module registry. Idempotent. |
+| `migrations/` | Incremental schema migrations applied after `schema.sql`. |
+| `docs/VOICE_AUDITION.md` | Gate 0 — the Spanish voice check, required before launch. |
 
 Every module is a single self-contained HTML file that signs in against the
 same Worker with the JWT already in `localStorage`.
@@ -140,6 +143,13 @@ email. They can sign in from that point on.
 | PATCH | `/tools/:slug/access` | `{email, enabled}` — parent only |
 | GET | `/progress/:slug` | `{state, updated_at}` |
 | PUT | `/progress/:slug` | `{state}` — arbitrary JSON object |
+| POST | `/spanish/session` | starts a session; enforces the budget gates |
+| POST | `/spanish/session/:id/turn` | one exchange → reply text + mp3 |
+| POST | `/spanish/session/:id/end` | aggregates, summary, next lesson plan |
+| GET | `/spanish/profile` | learner profile, streak, today's plan |
+| PATCH | `/spanish/profile` | learner-owned preferences |
+| GET | `/spanish/reports/:studentId` | parent only, same family |
+| PATCH | `/spanish/settings/:studentId` | parent only, same family |
 
 ## Modules
 
@@ -152,7 +162,7 @@ module online is an `UPDATE`, not a frontend change.
 | `spelling-drill` | online — `games/spell-invaders.html` |
 | `math-facts` | online — `games/fact-runner.html` |
 | `essay-coach` | online — `essay-coach.html` |
-| `spanish-tutor` | standby |
+| `spanish-tutor` | online — `spanish-coach.html` (after migration 003) |
 | `typing-trainer` | standby |
 
 Modules open in the **same tab** as the bridge, and each one carries a
@@ -179,3 +189,58 @@ Problem sets, all selectable independently:
 State lives in `tool_progress` under `math-facts`: best score, run count,
 furthest distance, chosen operations, mute. No new tables and no new endpoints —
 it rides the generic `/progress/:slug` pair.
+
+### Spanish Coach
+
+Voice-first Spanish conversation. The child holds a button, speaks, and the coach
+answers aloud — correcting the way a parent does, by **recasting** rather than
+lecturing. Say *"Yo fue al parque"* and the coach replies *"Ah, **fuiste** al
+parque. ¿Qué hiciste allí?"* — the correction is modelled, stressed in the audio,
+highlighted on screen, and logged, without ever stopping the conversation.
+
+**Architecture (Engine P — pipeline).** The browser does speech recognition with
+the Web Speech API and plays back audio. Everything paid runs through the Worker:
+Claude drives the conversation, the Worker records the pedagogy, and OpenAI
+synthesizes the reply. No provider key ever reaches the browser, and the module
+speaks only to the Worker — no new domains to whitelist.
+
+**Every session follows a six-phase arc** on an injected clock, because a model
+left to free-converse asks *"¿Qué te gusta hacer?"* every day and runs dry by
+minute six:
+
+| Phase | Window (of 15 min) | Purpose |
+| --- | --- | --- |
+| Saludo | 0:00–1:30 | Fixed greeting ritual — builds automaticity |
+| Recuerdo | 1:30–3:00 | Callbacks from the lesson plan |
+| Tema | 3:00–8:00 | Today's curriculum unit, in real conversation |
+| Escena | 8:00–11:30 | Role-play the scenario |
+| Juego | 11:30–13:30 | A game using today's words |
+| Cierre | 13:30–15:00 | Recap, praise, preview, goodbye — never skipped |
+
+Phase windows are fractions, so a 20- or 30-minute setting stretches the arc
+rather than redefining it.
+
+**Memory.** After each session one Claude call writes the parent summary, the
+child's summary, and **the next session's lesson plan** — callback hooks drawn
+from what the child actually said, target words, and the scenario. That plan is
+loaded at the next start, which is how the coach remembers the dog's name.
+Skill estimates and review scheduling stay deterministic in SQL; the model
+proposes, the database decides.
+
+**Cost controls,** since audio is billed by the minute:
+
+- Session creation is refused past `SPANISH_MONTHLY_AUDIO_MINUTES` (family-wide)
+  or the learner's `daily_session_cap` — with a kind message, not an error.
+- A client timer force-ends at the session limit plus 30 seconds' grace, and
+  stale `active` rows are auto-abandoned on the next start.
+- Every session accumulates audio seconds; the parent report shows month-to-date
+  minutes and an estimated cost.
+
+Nine tables (`spanish_profiles`, `_sessions`, `_turns`, `_interventions`,
+`_skills`, `_vocabulary`, `_scenarios`, `_topics`, `_lesson_plans`) come from
+`migrations/003_spanish_coach.sql`, which also seeds a 12-unit curriculum and
+five role-play scenarios.
+
+> **Before enabling this for the kids, complete `docs/VOICE_AUDITION.md`.** The
+> coach's voice is the pronunciation curriculum — if it speaks Spanish with an
+> American accent, it teaches an American accent. That check takes 20 minutes.

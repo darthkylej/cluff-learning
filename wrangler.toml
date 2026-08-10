@@ -11,5 +11,16 @@ required = [
   "RESEND_API_KEY",    # Resend API key
   "RESEND_FROM",       # e.g. "Cluff Learning <no-reply@yourdomain.com>"
   "BOOTSTRAP_EMAILS",  # comma-separated admin emails allowed to self-register
-  "ANTHROPIC_API_KEY", # for the essay grader's calls to Claude
+  "ANTHROPIC_API_KEY", # Claude — essay grading, and the Spanish conversation brain
+  "OPENAI_API_KEY",    # speech synthesis for Spanish Coach
 ]
+
+[vars]
+# ── Spanish Coach ──
+# Voice must be chosen by the Gate 0 audition first — see docs/VOICE_AUDITION.md.
+SPANISH_TTS_MODEL = "gpt-4o-mini-tts"
+SPANISH_TTS_VOICE = "coral"
+SPANISH_TTS_SPEED = "1.0"
+# Hard ceiling on paid audio across the whole family, per calendar month.
+# Baseline usage (4 kids x 15 min x 30 days) is ~1800; 2400 leaves headroom.
+SPANISH_MONTHLY_AUDIO_MINUTES = "2400"
