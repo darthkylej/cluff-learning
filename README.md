@@ -204,17 +204,26 @@ conversation, the Worker records the pedagogy, and OpenAI synthesizes the reply.
 No provider key ever reaches the browser, and the module speaks only to the
 Worker — no new domains to whitelist.
 
-**Listening works two ways,** picked automatically:
+**Listening works two ways:**
 
 | Mode | When | Notes |
 | --- | --- | --- |
-| `websr` | Web Speech API available (Chrome, Edge, Safari) | Free, instant. Chrome sends the audio to Google. |
-| `record` | Everywhere else (Firefox, Brave) | `MediaRecorder` uploads to the Worker, which transcribes via OpenAI. ≈$0.006/min. |
+| `record` | **Default**, every modern browser | `MediaRecorder` uploads to the Worker, which transcribes via OpenAI. ≈$0.006/min. Deterministic — it either captures bytes or it doesn't. |
+| `websr` | Opt in with `?stt=browser` | Web Speech API. Free and instant, but Chrome/Edge/Safari only, and Chrome sends the audio to Google. |
 
 Both hit the same `/turn` endpoint in one round trip — JSON carries a
-browser-made transcript, raw audio gets transcribed server-side. Append
-`?stt=server` to force the server path in any browser, which is also the
-answer if you'd rather Google not receive your kids' voices.
+browser-made transcript, raw audio gets transcribed server-side.
+
+`record` is the default because the Web Speech API ends recognition by itself
+after a brief silence, even with `continuous = true`. A child who holds the
+button and pauses to think loses the whole turn, and the API reports no error
+when it happens — it just returns nothing.
+
+**A live level meter runs while the button is held** — a ring around the mic
+and a bar beneath it. If a turn produces no words, the app distinguishes "I
+didn't catch that" from "your microphone is silent" and says which. There is
+also a **Test microphone** button on the home screen. A dead mic should never
+again look like a coach that isn't listening.
 
 Server-side transcription uses `whisper-1` deliberately: its per-segment
 logprobs give a confidence score, so the coach still knows when a transcript is

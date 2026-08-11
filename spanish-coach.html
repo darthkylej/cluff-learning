@@ -130,10 +130,21 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 .coachline .em{color:var(--amber);font-weight:600}
 .youline{font-size:.88rem;color:var(--dim);font-style:italic;min-height:1.3em}
 
-.orb{width:96px;height:96px;border-radius:50%;border:2px solid rgba(245,165,36,.35);
+.orb{position:relative;--lvl:0;width:96px;height:96px;border-radius:50%;border:2px solid rgba(245,165,36,.35);
   display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
   background:radial-gradient(circle at 50% 40%, rgba(245,165,36,.20), rgba(245,165,36,.04));
   transition:all .18s var(--ease);touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+/* Ring that swells with live input — proves the mic is actually hearing you. */
+.orb.rec::after{content:'';position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--green);
+  opacity:calc(.12 + var(--lvl) * .88);transform:scale(calc(1 + var(--lvl) * .16));pointer-events:none}
+
+.levelbar{width:150px;height:6px;border-radius:3px;background:rgba(255,255,255,.08);
+  overflow:hidden;opacity:0;transition:opacity .2s var(--ease)}
+.levelbar.on{opacity:1}
+.levelbar i{display:block;height:100%;width:0;border-radius:3px;
+  background:linear-gradient(90deg,var(--green),var(--amber));transition:width .05s linear}
+.levelnote{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--faint);min-height:1em}
 .orb:hover:not(.off){border-color:rgba(245,165,36,.7)}
 .orb.rec{border-color:var(--green);background:radial-gradient(circle at 50% 40%, rgba(52,211,153,.30), rgba(52,211,153,.06));
   box-shadow:0 0 40px -6px rgba(52,211,153,.75);animation:breathe 1.6s var(--ease) infinite}
@@ -239,6 +250,11 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
       <div class="startWrap">
         <button id="btnStart" class="bigStart">▶ Empezar</button>
         <p style="margin:.9rem 0 0;color:var(--faint);font-size:.8rem" id="startHint">15 minutes of Spanish</p>
+        <div style="margin-top:1.4rem;display:flex;flex-direction:column;align-items:center;gap:.5rem">
+          <button class="btn ghost sm" id="btnMicCheck">🎤 Test microphone</button>
+          <div class="levelbar" id="micBar"><i></i></div>
+          <div class="levelnote" id="micNote"></div>
+        </div>
       </div>
 
       <div id="lastSummary"></div>
@@ -255,6 +271,7 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
           <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
         </div>
         <div class="orbhint" id="orbHint">Hold to talk</div>
+        <div class="levelbar" id="levelBar"><i></i></div>
         <div class="youline" id="youLine"></div>
         <div class="timer">Time <b id="timeLeft">15:00</b></div>
       </div>
@@ -361,20 +378,24 @@ function showScreen(name){
 /* ══════════════════════════════════════════════════════════════
    Listening — two modes
 
-   'websr'  Web Speech API. Free and instant, but Chrome/Edge/Safari
-            only, and Chrome sends the audio to Google.
-   'record' MediaRecorder uploads audio to our Worker, which
-            transcribes it. Works in every modern browser and keeps
-            the audio with providers we already use.
+   'record' DEFAULT. MediaRecorder captures audio and the Worker
+            transcribes it. Deterministic: it either captures bytes
+            or it doesn't. Works in every modern browser, and the
+            audio stays with providers we already pay.
+   'websr'  Web Speech API (?stt=browser). Free and instant, but
+            Chrome/Edge/Safari only, Chrome ships the audio to
+            Google, and Chrome ends recognition by itself after a
+            short silence — which silently eats a child's turn when
+            they pause to think before speaking.
 ══════════════════════════════════════════════════════════════ */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const SR_OK = !!SR;
 const MR_OK = typeof MediaRecorder !== 'undefined'
            && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-// Force the server path with ?stt=server — useful for testing, and for
-// anyone who would rather Google not receive their child's voice.
-const FORCE_SERVER = new URLSearchParams(location.search).get('stt') === 'server';
-const MODE = (SR_OK && !FORCE_SERVER) ? 'websr' : (MR_OK ? 'record' : 'none');
+const STT_PARAM = new URLSearchParams(location.search).get('stt');
+const MODE = STT_PARAM === 'browser'
+  ? (SR_OK ? 'websr' : (MR_OK ? 'record' : 'none'))
+  : (MR_OK ? 'record' : (SR_OK ? 'websr' : 'none'));
 
 let recog=null, recActive=false, recResolve=null, recFinal='', recConf=null, recStart=0;
 
@@ -407,13 +428,23 @@ function buildRecognizer(){
   };
   r.onend=()=>{
     recActive=false;
+    // Chrome ends recognition on its own after a brief silence. If the child
+    // is still holding the button they haven't finished — restart, or their
+    // turn vanishes with no error anywhere.
+    if(holding && !recResolve){
+      try{ recog=buildRecognizer(); recog.start(); recActive=true; return; }
+      catch(e){ console.warn('restart failed',e); }
+    }
     if(recResolve){ const f=recResolve; recResolve=null; f(); }
   };
   return r;
 }
 
 function startListening(){
-  if(!SR_OK||recActive) return;
+  if(!SR_OK) return;
+  // Never let a stuck flag silently disable every future turn.
+  if(recActive && recog){ try{ recog.abort(); }catch(e){} }
+  recActive=false; recResolve=null;
   recFinal=''; recConf=null; recStart=Date.now();
   $('youLine').textContent='';
   try{ recog=buildRecognizer(); recog.start(); recActive=true; }
@@ -431,6 +462,60 @@ function stopListening(){
     try{ recog.stop(); }catch(e){ recActive=false; recResolve=null; resolve({text:recFinal.trim(),conf:recConf,secs:0}); }
   });
 }
+
+/* ── Input level meter ──────────────────────────────────────────
+   Without this a dead microphone looks exactly like a coach that
+   isn't listening. The bar moves, or the mic is the problem.
+──────────────────────────────────────────────────────────────── */
+let audioCtx=null, levelSrc=null, levelRAF=null, peakLevel=0;
+
+function startLevelMeter(stream, onLevel){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    audioCtx = audioCtx || new AC();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+
+    if(levelSrc){ try{ levelSrc.disconnect(); }catch(e){} }
+    levelSrc = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    levelSrc.connect(analyser);
+
+    const buf = new Uint8Array(analyser.fftSize);
+    peakLevel = 0;
+
+    const tick=()=>{
+      analyser.getByteTimeDomainData(buf);
+      let peak=0;
+      for(let i=0;i<buf.length;i++){
+        const v=Math.abs(buf[i]-128)/128;
+        if(v>peak) peak=v;
+      }
+      if(peak>peakLevel) peakLevel=peak;
+      onLevel(Math.min(1,peak*2.6));              // speech rarely nears full scale
+      levelRAF=requestAnimationFrame(tick);
+    };
+    tick();
+  }catch(e){ console.warn('level meter unavailable',e); }
+}
+
+// Session meter: the ring around the orb plus the bar beneath it.
+function sessionLevel(v){
+  $('orb').style.setProperty('--lvl',v.toFixed(3));
+  $('levelBar').firstElementChild.style.width=(v*100).toFixed(1)+'%';
+}
+
+function stopLevelMeter(){
+  if(levelRAF) cancelAnimationFrame(levelRAF);
+  levelRAF=null;
+  $('orb').style.setProperty('--lvl','0');
+  $('levelBar').classList.remove('on');
+  $('levelBar').firstElementChild.style.width='0';
+}
+
+// Was there any real sound in the last hold? 0.02 clears mic self-noise.
+function heardSomething(){ return peakLevel > 0.02; }
 
 /* ── Mode 2: MediaRecorder → Worker → transcription ── */
 let mediaStream=null, recorder=null, recChunks=[], recTs=0;
@@ -450,8 +535,8 @@ async function ensureStream(){
   return mediaStream;
 }
 
-async function startRecording(){
-  const stream=await ensureStream();
+async function startRecording(existing){
+  const stream=existing||await ensureStream();
   recChunks=[]; recTs=Date.now();
   const mime=pickMime();
   recorder = mime ? new MediaRecorder(stream,{mimeType:mime}) : new MediaRecorder(stream);
@@ -636,16 +721,34 @@ async function beginHold(){
   $('orbHint').textContent='Listening… release when done';
   setState('listening','Escuchando…');
 
-  if(MODE==='websr'){
-    startListening();
+  try{
+    // Both modes get the level meter, so "is the mic live?" is always answerable.
+    const stream=await ensureStream();
+    $('levelBar').classList.add('on');
+    startLevelMeter(stream, sessionLevel);
+    if(MODE==='websr') startListening();
+    else await startRecording(stream);
+  }catch(e){
+    console.warn('capture failed',e);
+    holding=false;
+    $('orb').classList.remove('rec');
+    stopLevelMeter();
+    readyToTalk();
+    toast('Microphone unavailable — check the site’s mic permission.',true);
+  }
+}
+
+// Nothing captured? Say why. Silence here is what made this feel broken.
+function nothingHeard(){
+  stopLevelMeter();
+  if(!heardSomething()){
+    $('youLine').textContent='';
+    toast('I couldn’t hear your microphone — check that the right one is selected.',true);
+    $('orbHint').textContent='Mic silent — check permissions';
+    setState('listening','Tu turno');
   } else {
-    try{ await startRecording(); }
-    catch(e){
-      holding=false;
-      $('orb').classList.remove('rec');
-      readyToTalk();
-      toast('Microphone unavailable — check permissions.',true);
-    }
+    toast('I didn’t catch that — hold the button and try again.');
+    readyToTalk();
   }
 }
 
@@ -657,11 +760,13 @@ async function endHold(){
 
   if(MODE==='websr'){
     const {text,conf,secs}=await stopListening();
-    if(!text){ readyToTalk(); return; }
+    stopLevelMeter();
+    if(!text){ nothingHeard(); return; }
     await sendTurn({transcript:text,confidence:conf,seconds:secs});
   } else {
     const rec=await stopRecording();
-    if(!rec || rec.blob.size<1200){ readyToTalk(); return; }   // silence
+    stopLevelMeter();
+    if(!rec || rec.blob.size<1200){ nothingHeard(); return; }
     await sendTurn({audio:rec});
   }
 }
@@ -680,11 +785,10 @@ async function startSession(){
     return;
   }
 
-  // Ask for the mic up front so permission is settled before the coach speaks.
-  // In record mode keep the stream — MediaRecorder reuses it.
+  // Settle mic permission before the coach speaks. Keep the stream in both
+  // modes — the recorder needs it, and so does the level meter.
   try{
-    const stream=await ensureStream();
-    if(MODE==='websr'){ stream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
+    await ensureStream();
   }catch(e){
     $('errHome').textContent='Microphone permission is needed to talk with the coach.';
     $('errHome').hidden=false;
@@ -826,7 +930,42 @@ async function boot(){
   await loadHome();
 }
 
+/* ── mic check ── */
+let micCheckRunning=false;
+
+async function runMicCheck(){
+  if(micCheckRunning) return;
+  micCheckRunning=true;
+  const btn=$('btnMicCheck'), bar=$('micBar'), note=$('micNote');
+  btn.disabled=true;
+  note.textContent='Say something…';
+  bar.classList.add('on');
+
+  try{
+    const stream=await ensureStream();
+    startLevelMeter(stream, v=>{ bar.firstElementChild.style.width=(v*100).toFixed(1)+'%'; });
+    await new Promise(r=>setTimeout(r,5000));
+    const peak=peakLevel;
+    stopLevelMeter();
+    bar.firstElementChild.style.width='0';
+    bar.classList.remove('on');
+    note.textContent = peak>0.02
+      ? `Microphone works — peak ${Math.round(Math.min(1,peak*2.6)*100)}%`
+      : 'No sound detected. Check the mic permission and which device is selected.';
+    note.style.color = peak>0.02 ? 'var(--green)' : 'var(--rose)';
+  }catch(e){
+    stopLevelMeter();
+    bar.classList.remove('on');
+    note.textContent='Microphone blocked — allow it for this site, then retry.';
+    note.style.color='var(--rose)';
+  }finally{
+    btn.disabled=false;
+    micCheckRunning=false;
+  }
+}
+
 /* ── wiring ── */
+$('btnMicCheck').addEventListener('click',runMicCheck);
 $('btnStart').addEventListener('click',startSession);
 $('btnAgain').addEventListener('click',()=>{ showScreen('home'); loadHome(); });
 $('btnEnd').addEventListener('click',()=>{ if(confirm('¿Terminar la sesión?')) endSession(); });
