@@ -198,11 +198,28 @@ lecturing. Say *"Yo fue al parque"* and the coach replies *"Ah, **fuiste** al
 parque. ¿Qué hiciste allí?"* — the correction is modelled, stressed in the audio,
 highlighted on screen, and logged, without ever stopping the conversation.
 
-**Architecture (Engine P — pipeline).** The browser does speech recognition with
-the Web Speech API and plays back audio. Everything paid runs through the Worker:
-Claude drives the conversation, the Worker records the pedagogy, and OpenAI
-synthesizes the reply. No provider key ever reaches the browser, and the module
-speaks only to the Worker — no new domains to whitelist.
+**Architecture (Engine P — pipeline).** The browser captures speech and plays
+audio back. Everything paid runs through the Worker: Claude drives the
+conversation, the Worker records the pedagogy, and OpenAI synthesizes the reply.
+No provider key ever reaches the browser, and the module speaks only to the
+Worker — no new domains to whitelist.
+
+**Listening works two ways,** picked automatically:
+
+| Mode | When | Notes |
+| --- | --- | --- |
+| `websr` | Web Speech API available (Chrome, Edge, Safari) | Free, instant. Chrome sends the audio to Google. |
+| `record` | Everywhere else (Firefox, Brave) | `MediaRecorder` uploads to the Worker, which transcribes via OpenAI. ≈$0.006/min. |
+
+Both hit the same `/turn` endpoint in one round trip — JSON carries a
+browser-made transcript, raw audio gets transcribed server-side. Append
+`?stt=server` to force the server path in any browser, which is also the
+answer if you'd rather Google not receive your kids' voices.
+
+Server-side transcription uses `whisper-1` deliberately: its per-segment
+logprobs give a confidence score, so the coach still knows when a transcript is
+unreliable and must not treat it as a learner error. That protection is worth
+more than the ~$2/month a cheaper model would save.
 
 **Every session follows a six-phase arc** on an injected clock, because a model
 left to free-converse asks *"¿Qué te gusta hacer?"* every day and runs dry by

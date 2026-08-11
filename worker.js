@@ -1706,6 +1706,55 @@ async function spanishSynthesize(env, text, emphasisWord) {
   return btoa(binary);
 }
 
+// ── Speech recognition (server-side fallback) ──────────────────
+// Browsers without the Web Speech API (Firefox, Brave) record audio and
+// upload it here instead. Also the privacy-preferable path in Chrome,
+// where Web Speech sends the child's audio to Google.
+async function spanishTranscribe(env, bytes, contentType) {
+  if (!env.OPENAI_API_KEY) throw new Error('Speech recognition is not configured.');
+
+  const model = env.SPANISH_STT_MODEL || 'whisper-1';
+  const ext =
+    contentType.includes('webm') ? 'webm' :
+    contentType.includes('mp4') || contentType.includes('m4a') ? 'mp4' :
+    contentType.includes('mpeg') || contentType.includes('mp3') ? 'mp3' :
+    contentType.includes('wav') ? 'wav' : 'webm';
+
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type: contentType }), `speech.${ext}`);
+  form.append('model', model);
+  // Steers proper nouns and register; helps a lot with children's speech.
+  form.append('prompt', 'Conversación en español entre un niño y su maestro de español.');
+  if (model === 'whisper-1') {
+    form.append('language', 'es');
+    form.append('response_format', 'verbose_json');   // carries avg_logprob
+  } else {
+    form.append('languages[]', 'es');
+  }
+
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}` },
+    body: form,
+  });
+  if (!res.ok) {
+    throw new Error(`Transcription ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+  const data = await res.json();
+
+  // Derive a rough confidence so the coach still knows when NOT to treat
+  // something as a learner error. verbose_json gives per-segment avg_logprob;
+  // models that don't return it yield null, which the prompt reads as "unknown".
+  let confidence = null;
+  const segs = Array.isArray(data.segments) ? data.segments : [];
+  if (segs.length) {
+    const lp = segs.reduce((n, s) => n + (Number(s.avg_logprob) || 0), 0) / segs.length;
+    const noSpeech = segs.reduce((n, s) => n + (Number(s.no_speech_prob) || 0), 0) / segs.length;
+    confidence = Math.max(0, Math.min(1, Math.exp(lp) * (1 - noSpeech)));
+  }
+  return { text: String(data.text || '').trim(), confidence };
+}
+
 // ── Session creation ───────────────────────────────────────────
 async function handleCreateSpanishSession(request, env) {
   return withUser(request, env, async (session) => {
@@ -1801,12 +1850,43 @@ async function handleSpanishTurn(request, env, sessionId) {
       return err(request, 'Session time is up.', 409);
     }
 
-    const body       = await request.json().catch(() => ({}));
-    const transcript = cleanText(body.transcript, 2000);
-    const confidence = Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : null;
-    const turnIndex  = clampInt(body.turn_index, 0, 100000);
-    const control    = cleanKey(body.control);      // slower | repeat | meaning | direct
-    const phase      = spanishPhase(elapsed, totalMin);
+    // Two input shapes. Browsers with the Web Speech API send JSON with a
+    // transcript they produced; every other browser uploads raw audio and we
+    // transcribe it here. Same endpoint either way, so one round trip.
+    const contentType = request.headers.get('Content-Type') || '';
+    let transcript, confidence, turnIndex, control, learnerSeconds;
+
+    if (contentType.startsWith('audio/')) {
+      const params   = new URL(request.url).searchParams;
+      turnIndex      = clampInt(params.get('turn_index'), 0, 100000);
+      control        = cleanKey(params.get('control'));
+      learnerSeconds = spanishNum(params.get('seconds'), 0, 300, 0);
+
+      const bytes = await request.arrayBuffer();
+      if (bytes.byteLength > 24 * 1024 * 1024) {
+        return err(request, 'That recording is too long.', 413);
+      }
+      if (bytes.byteLength < 1200) {
+        transcript = null; confidence = null;      // effectively silence
+      } else {
+        try {
+          const heard = await spanishTranscribe(env, bytes, contentType);
+          transcript  = cleanText(heard.text, 2000);
+          confidence  = heard.confidence;
+        } catch (e) {
+          console.error('Transcription failed', e);
+          return err(request, 'The coach could not hear that — try again.', 502);
+        }
+      }
+    } else {
+      const body     = await request.json().catch(() => ({}));
+      transcript     = cleanText(body.transcript, 2000);
+      confidence     = Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : null;
+      turnIndex      = clampInt(body.turn_index, 0, 100000);
+      control        = cleanKey(body.control);    // slower | repeat | meaning | direct
+      learnerSeconds = spanishNum(body.audio_seconds, 0, 300, 0);
+    }
+    const phase = spanishPhase(elapsed, totalMin);
 
     // Recent history keeps the prompt bounded on long sessions.
     const histR = await query(env,
@@ -1821,7 +1901,7 @@ async function handleSpanishTurn(request, env, sessionId) {
          VALUES ($1,$2,'learner',$3,$4,$5,$6)
          ON CONFLICT (session_id, turn_index, speaker) DO NOTHING`,
         [sessionId, turnIndex, transcript, confidence,
-         spanishNum(body.audio_seconds, 0, 300, spanishSpeechSeconds(transcript)), phase.key]);
+         learnerSeconds || spanishSpeechSeconds(transcript), phase.key]);
     }
 
     const ctx = await loadSpanishContext(env, session.user_id, sess.scenario_key);
@@ -1906,7 +1986,7 @@ async function handleSpanishTurn(request, env, sessionId) {
     }
 
     const learnerSecs = transcript
-      ? spanishNum(body.audio_seconds, 0, 300, spanishSpeechSeconds(transcript)) : 0;
+      ? (learnerSeconds || spanishSpeechSeconds(transcript)) : 0;
     const coachSecs   = spanishSpeechSeconds(replyText);
     await query(env,
       `UPDATE spanish_sessions
@@ -1921,6 +2001,7 @@ async function handleSpanishTurn(request, env, sessionId) {
     return json(request, {
       reply_text: replyText,
       audio_b64:  audio,             // null => browser shows text only
+      heard:      transcript || null, // what we transcribed, for the UI to echo
       turn_index: turnIndex,
       phase:      phase.key,
       phase_name: phase.name,

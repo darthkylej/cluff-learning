@@ -21,6 +21,10 @@ required = [
 SPANISH_TTS_MODEL = "gpt-4o-mini-tts"
 SPANISH_TTS_VOICE = "coral"
 SPANISH_TTS_SPEED = "1.0"
+# Speech recognition for browsers without the Web Speech API (Firefox, Brave).
+# whisper-1 returns per-segment logprobs, which is how the coach still knows
+# when a transcript is unreliable and must not be treated as a learner error.
+SPANISH_STT_MODEL = "whisper-1"
 # Hard ceiling on paid audio across the whole family, per calendar month.
 # Baseline usage (4 kids x 15 min x 30 days) is ~1800; 2400 leaves headroom.
 SPANISH_MONTHLY_AUDIO_MINUTES = "2400"

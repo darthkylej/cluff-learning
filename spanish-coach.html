@@ -359,10 +359,22 @@ function showScreen(name){
 })();
 
 /* ══════════════════════════════════════════════════════════════
-   Speech recognition (Web Speech API)
+   Listening — two modes
+
+   'websr'  Web Speech API. Free and instant, but Chrome/Edge/Safari
+            only, and Chrome sends the audio to Google.
+   'record' MediaRecorder uploads audio to our Worker, which
+            transcribes it. Works in every modern browser and keeps
+            the audio with providers we already use.
 ══════════════════════════════════════════════════════════════ */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const SR_OK = !!SR;
+const MR_OK = typeof MediaRecorder !== 'undefined'
+           && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+// Force the server path with ?stt=server — useful for testing, and for
+// anyone who would rather Google not receive their child's voice.
+const FORCE_SERVER = new URLSearchParams(location.search).get('stt') === 'server';
+const MODE = (SR_OK && !FORCE_SERVER) ? 'websr' : (MR_OK ? 'record' : 'none');
 
 let recog=null, recActive=false, recResolve=null, recFinal='', recConf=null, recStart=0;
 
@@ -418,6 +430,69 @@ function stopListening(){
     });
     try{ recog.stop(); }catch(e){ recActive=false; recResolve=null; resolve({text:recFinal.trim(),conf:recConf,secs:0}); }
   });
+}
+
+/* ── Mode 2: MediaRecorder → Worker → transcription ── */
+let mediaStream=null, recorder=null, recChunks=[], recTs=0;
+
+function pickMime(){
+  const candidates=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/mpeg'];
+  if(!MediaRecorder.isTypeSupported) return '';
+  for(const m of candidates){ if(MediaRecorder.isTypeSupported(m)) return m; }
+  return '';   // let the browser choose; the Worker sniffs the type
+}
+
+async function ensureStream(){
+  if(mediaStream && mediaStream.active) return mediaStream;
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }
+  });
+  return mediaStream;
+}
+
+async function startRecording(){
+  const stream=await ensureStream();
+  recChunks=[]; recTs=Date.now();
+  const mime=pickMime();
+  recorder = mime ? new MediaRecorder(stream,{mimeType:mime}) : new MediaRecorder(stream);
+  recorder.ondataavailable=e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
+  recorder.start();
+  $('youLine').textContent='';
+}
+
+function stopRecording(){
+  return new Promise(resolve=>{
+    if(!recorder || recorder.state==='inactive'){ resolve(null); return; }
+    recorder.onstop=()=>{
+      const type=recorder.mimeType||'audio/webm';
+      resolve({
+        blob: new Blob(recChunks,{type}),
+        type: type.split(';')[0],          // the Worker wants a bare MIME type
+        secs: Math.min(300,(Date.now()-recTs)/1000)
+      });
+    };
+    try{ recorder.stop(); }
+    catch(e){ resolve(null); }
+  });
+}
+
+// Audio can't go through api() — it's a raw body, so metadata rides the query string.
+async function postAudioTurn(rec,control){
+  const token=localStorage.getItem(TOKEN_KEY);
+  const qs=new URLSearchParams({ turn_index:String(S.turn), seconds:rec.secs.toFixed(1) });
+  if(control) qs.set('control',control);
+  try{
+    const res=await fetch(`${API_URL}/spanish/session/${S.id}/turn?${qs}`,{
+      method:'POST',
+      headers:{ 'Content-Type':rec.type, 'Authorization':'Bearer '+token },
+      body:rec.blob
+    });
+    const text=await res.text();
+    let data={};
+    try{ data=text?JSON.parse(text):{}; }catch(e){ data={ error:text||('HTTP '+res.status) }; }
+    if(!res.ok) return { error:data.error||('HTTP '+res.status), status:res.status };
+    return data;
+  }catch(e){ return { error:e.message||'Network error' }; }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -488,19 +563,21 @@ function startTimer(){
 /* ══════════════════════════════════════════════════════════════
    Turn loop
 ══════════════════════════════════════════════════════════════ */
-async function sendTurn({transcript,confidence,seconds,control}){
+async function sendTurn({transcript,confidence,seconds,control,audio}){
   if(S.busy||S.ended) return;
   S.busy=true;
   setState('thinking','Pensando…');
   $('orb').classList.add('off');
 
-  const res=await api('POST',`/spanish/session/${S.id}/turn`,{
-    transcript: transcript||null,
-    confidence: confidence,
-    audio_seconds: seconds,
-    turn_index: S.turn,
-    control: control||null
-  });
+  const res = audio
+    ? await postAudioTurn(audio,control)
+    : await api('POST',`/spanish/session/${S.id}/turn`,{
+        transcript: transcript||null,
+        confidence: confidence,
+        audio_seconds: seconds,
+        turn_index: S.turn,
+        control: control||null
+      });
 
   if(res.error){
     S.busy=false;
@@ -514,7 +591,12 @@ async function sendTurn({transcript,confidence,seconds,control}){
   S.turn++;
   if(res.phase&&res.phase!==S.phaseKey){ S.phaseKey=res.phase; renderPhases(); }
 
-  if(transcript) pushTranscript('learner',transcript);
+  // In record mode we only learn what the child said once the server replies.
+  const said = transcript || res.heard;
+  if(said){
+    pushTranscript('learner',said);
+    $('youLine').textContent=said;
+  }
   pushTranscript('coach',res.reply_text);
 
   // Highlight the recast target so the correction is visible as well as audible.
@@ -524,7 +606,8 @@ async function sendTurn({transcript,confidence,seconds,control}){
     html=html.replace(new RegExp('('+safe+')','i'),'<span class="em">$1</span>');
   }
   $('coachLine').innerHTML=html;
-  $('youLine').textContent='';
+  // Leave what they said on screen — in record mode it's their only way to
+  // see whether the recognizer heard them correctly.
 
   setState('speaking','Hablando…');
   await playAudio(res.audio_b64);
@@ -539,15 +622,31 @@ async function sendTurn({transcript,confidence,seconds,control}){
 /* ── push-to-talk ── */
 let holding=false;
 
+function readyToTalk(){
+  setState('listening','Tu turno');
+  $('orbHint').textContent='Hold to talk';
+}
+
 async function beginHold(){
   if(S.busy||S.ended||holding||!S.id) return;
-  if(!SR_OK){ toast('This browser cannot listen. Try Chrome or Edge.',true); return; }
+  if(MODE==='none'){ toast('This browser cannot record audio.',true); return; }
   holding=true;
   stopAudio();
   $('orb').classList.add('rec');
   $('orbHint').textContent='Listening… release when done';
   setState('listening','Escuchando…');
-  startListening();
+
+  if(MODE==='websr'){
+    startListening();
+  } else {
+    try{ await startRecording(); }
+    catch(e){
+      holding=false;
+      $('orb').classList.remove('rec');
+      readyToTalk();
+      toast('Microphone unavailable — check permissions.',true);
+    }
+  }
 }
 
 async function endHold(){
@@ -555,13 +654,16 @@ async function endHold(){
   holding=false;
   $('orb').classList.remove('rec');
   $('orbHint').textContent='…';
-  const {text,conf,secs}=await stopListening();
-  if(!text){
-    setState('listening','Tu turno');
-    $('orbHint').textContent='Hold to talk';
-    return;
+
+  if(MODE==='websr'){
+    const {text,conf,secs}=await stopListening();
+    if(!text){ readyToTalk(); return; }
+    await sendTurn({transcript:text,confidence:conf,seconds:secs});
+  } else {
+    const rec=await stopRecording();
+    if(!rec || rec.blob.size<1200){ readyToTalk(); return; }   // silence
+    await sendTurn({audio:rec});
   }
-  await sendTurn({transcript:text,confidence:conf,seconds:secs});
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -571,17 +673,18 @@ async function startSession(){
   $('btnStart').disabled=true;
   $('errHome').hidden=true;
 
-  if(!SR_OK){
-    $('errHome').textContent='This browser does not support speech recognition. Please use Chrome or Edge.';
+  if(MODE==='none'){
+    $('errHome').textContent='This browser cannot record audio. Please use a current version of Chrome, Edge, Firefox, or Safari.';
     $('errHome').hidden=false;
     $('btnStart').disabled=false;
     return;
   }
 
   // Ask for the mic up front so permission is settled before the coach speaks.
+  // In record mode keep the stream — MediaRecorder reuses it.
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-    stream.getTracks().forEach(t=>t.stop());
+    const stream=await ensureStream();
+    if(MODE==='websr'){ stream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
   }catch(e){
     $('errHome').textContent='Microphone permission is needed to talk with the coach.';
     $('errHome').hidden=false;
@@ -696,8 +799,8 @@ async function loadHome(){
        <p style="margin:.5rem 0 0;color:var(--dim);font-size:.9rem">${esc(last.learner_summary)}</p></div>`
     : '';
 
-  if(!SR_OK){
-    $('noteHome').textContent='This browser cannot do speech recognition. Spanish Coach needs Chrome or Edge.';
+  if(MODE==='none'){
+    $('noteHome').textContent='This browser cannot record audio. Spanish Coach needs a current Chrome, Edge, Firefox, or Safari.';
     $('noteHome').hidden=false;
     $('btnStart').disabled=true;
   }
