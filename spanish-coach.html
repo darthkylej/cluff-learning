@@ -535,6 +535,12 @@ async function ensureStream(){
   return mediaStream;
 }
 
+// A child who leans on the button can otherwise record until the session ends,
+// and a several-minute upload from a tablet is what "thinking for a minute"
+// actually looks like. Stop at a length no turn legitimately exceeds.
+const MAX_HOLD_MS=90000;
+let holdCap=null;
+
 async function startRecording(existing){
   const stream=existing||await ensureStream();
   recChunks=[]; recTs=Date.now();
@@ -542,17 +548,24 @@ async function startRecording(existing){
   recorder = mime ? new MediaRecorder(stream,{mimeType:mime}) : new MediaRecorder(stream);
   recorder.ondataavailable=e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
   recorder.start();
+  clearTimeout(holdCap);
+  holdCap=setTimeout(()=>{ if(holding){ toast('That was a long turn — sending it now.'); endHold(); } },MAX_HOLD_MS);
   $('youLine').textContent='';
 }
 
 function stopRecording(){
+  clearTimeout(holdCap);
   return new Promise(resolve=>{
     if(!recorder || recorder.state==='inactive'){ resolve(null); return; }
     recorder.onstop=()=>{
-      const type=recorder.mimeType||'audio/webm';
+      const blob=new Blob(recChunks,{type:recorder.mimeType||''});
+      // The chunks' own type is the container that was really written; the
+      // recorder's configured mimeType is only what we asked for. Send the
+      // truth — the Worker names the upload from it, and OpenAI decodes by name.
+      const type=(blob.type||recorder.mimeType||'audio/webm').split(';')[0];
       resolve({
-        blob: new Blob(recChunks,{type}),
-        type: type.split(';')[0],          // the Worker wants a bare MIME type
+        blob,
+        type,                              // the Worker wants a bare MIME type
         secs: Math.min(300,(Date.now()-recTs)/1000)
       });
     };
@@ -933,6 +946,25 @@ async function boot(){
 /* ── mic check ── */
 let micCheckRunning=false;
 
+// Its own recorder, so a mic check can never disturb a live turn.
+function sampleRecording(stream,ms){
+  return new Promise(resolve=>{
+    let rec;
+    try{
+      const mime=pickMime();
+      rec = mime ? new MediaRecorder(stream,{mimeType:mime}) : new MediaRecorder(stream);
+    }catch(e){ resolve({type:'unsupported',bytes:0}); return; }
+    const chunks=[];
+    rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+    rec.onstop=()=>{
+      const blob=new Blob(chunks,{type:rec.mimeType||''});
+      resolve({ type:(blob.type||rec.mimeType||'unknown').split(';')[0], bytes:blob.size });
+    };
+    try{ rec.start(); }catch(e){ resolve({type:'unsupported',bytes:0}); return; }
+    setTimeout(()=>{ try{ rec.stop(); }catch(e){ resolve({type:'unknown',bytes:0}); } },ms);
+  });
+}
+
 async function runMicCheck(){
   if(micCheckRunning) return;
   micCheckRunning=true;
@@ -944,15 +976,31 @@ async function runMicCheck(){
   try{
     const stream=await ensureStream();
     startLevelMeter(stream, v=>{ bar.firstElementChild.style.width=(v*100).toFixed(1)+'%'; });
-    await new Promise(r=>setTimeout(r,5000));
+    // Record the sample too. A live level meter only proves the mic works; it
+    // says nothing about whether this device produces audio the coach can read,
+    // and that is the difference between two tablets that look identical.
+    let sample=null;
+    if(MODE==='record') sample=await sampleRecording(stream,5000);
+    else await new Promise(r=>setTimeout(r,5000));
     const peak=peakLevel;
     stopLevelMeter();
     bar.firstElementChild.style.width='0';
     bar.classList.remove('on');
-    note.textContent = peak>0.02
-      ? `Microphone works — peak ${Math.round(Math.min(1,peak*2.6)*100)}%`
-      : 'No sound detected. Check the mic permission and which device is selected.';
-    note.style.color = peak>0.02 ? 'var(--green)' : 'var(--rose)';
+
+    if(peak<=0.02){
+      note.textContent='No sound detected. Check the mic permission and which device is selected.';
+      note.style.color='var(--rose)';
+    } else {
+      const detail = sample
+        ? ` · records ${sample.type}, ${Math.round(sample.bytes/1024)} KB`
+        : (MODE==='websr' ? ' · using this browser’s own speech recognition' : '');
+      note.textContent=`Microphone works — peak ${Math.round(Math.min(1,peak*2.6)*100)}%${detail}`;
+      note.style.color='var(--green)';
+    }
+    if(sample && !sample.bytes){
+      note.textContent='The microphone is live but this tablet recorded nothing. Tell a parent.';
+      note.style.color='var(--rose)';
+    }
   }catch(e){
     stopLevelMeter();
     bar.classList.remove('on');

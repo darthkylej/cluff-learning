@@ -1722,38 +1722,92 @@ async function spanishSynthesize(env, text, emphasisWord) {
 // Browsers without the Web Speech API (Firefox, Brave) record audio and
 // upload it here instead. Also the privacy-preferable path in Chrome,
 // where Web Speech sends the child's audio to Google.
+// OpenAI picks its decoder from the filename, so a wrong extension rejects a
+// recording that was perfectly good. Map from the container the browser really
+// sent, and refuse to guess: labelling an Ogg file .webm fails as a 400 that
+// looks exactly like a broken microphone.
+function spanishAudioExt(contentType) {
+  const t = String(contentType || '').toLowerCase();
+  if (t.includes('webm')) return 'webm';
+  if (t.includes('ogg') || t.includes('oga') || t.includes('opus')) return 'ogg';
+  if (t.includes('mp4') || t.includes('m4a') || t.includes('aac')) return 'mp4';
+  if (t.includes('wav') || t.includes('wave')) return 'wav';
+  if (t.includes('flac')) return 'flac';
+  if (t.includes('mpeg') || t.includes('mpga') || t.includes('mp3')) return 'mp3';
+  return '';
+}
+
+// Tagged so the turn handler can tell a child something true about which part
+// broke, instead of blaming their microphone for every failure.
+function transcribeError(kind, message) {
+  const e = new Error(message);
+  e.kind = kind;                       // format | config | upstream
+  return e;
+}
+
+const SPANISH_STT_TIMEOUT_MS = 20000;
+
 async function spanishTranscribe(env, bytes, contentType) {
-  if (!env.OPENAI_API_KEY) throw new Error('Speech recognition is not configured.');
+  if (!env.OPENAI_API_KEY) {
+    throw transcribeError('config', 'Speech recognition is not configured.');
+  }
+
+  const ext = spanishAudioExt(contentType);
+  if (!ext) {
+    throw transcribeError('format', `Unsupported recording container: ${contentType}`);
+  }
 
   const model = env.SPANISH_STT_MODEL || 'whisper-1';
-  const ext =
-    contentType.includes('webm') ? 'webm' :
-    contentType.includes('mp4') || contentType.includes('m4a') ? 'mp4' :
-    contentType.includes('mpeg') || contentType.includes('mp3') ? 'mp3' :
-    contentType.includes('wav') ? 'wav' : 'webm';
 
-  const form = new FormData();
-  form.append('file', new Blob([bytes], { type: contentType }), `speech.${ext}`);
-  form.append('model', model);
-  // Steers proper nouns and register; helps a lot with children's speech.
-  form.append('prompt', 'Conversación en español entre un niño y su maestro de español.');
-  if (model === 'whisper-1') {
-    form.append('language', 'es');
-    form.append('response_format', 'verbose_json');   // carries avg_logprob
-  } else {
-    form.append('languages[]', 'es');
+  // One retry. This call sits in the middle of a child's turn, so a stalled
+  // connection should cost a few seconds, not the turn — and without the
+  // timeout a hung upstream just spins until the child gives up.
+  let last = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: contentType }), `speech.${ext}`);
+    form.append('model', model);
+    // Steers proper nouns and register; helps a lot with children's speech.
+    form.append('prompt', 'Conversación en español entre un niño y su maestro de español.');
+    if (model === 'whisper-1') {
+      form.append('language', 'es');
+      form.append('response_format', 'verbose_json');   // carries avg_logprob
+    } else {
+      form.append('languages[]', 'es');
+    }
+
+    let res;
+    try {
+      res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}` },
+        body: form,
+        signal: AbortSignal.timeout(SPANISH_STT_TIMEOUT_MS),
+      });
+    } catch (e) {
+      last = transcribeError('upstream', `Transcription request failed: ${e.name}: ${e.message}`);
+      continue;
+    }
+
+    if (!res.ok) {
+      const body = (await res.text().catch(() => '')).slice(0, 300);
+      // A 4xx means the key, the model, or the file is wrong, and a second
+      // identical request fails identically. Only 5xx and 429 are worth a retry.
+      if (res.status >= 500 || res.status === 429) {
+        last = transcribeError('upstream', `Transcription ${res.status}: ${body}`);
+        continue;
+      }
+      throw transcribeError(
+        res.status === 400 || res.status === 415 ? 'format' : 'config',
+        `Transcription ${res.status}: ${body}`);
+    }
+
+    return spanishReadTranscription(await res.json());
   }
+  throw last;
+}
 
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${env.OPENAI_API_KEY}` },
-    body: form,
-  });
-  if (!res.ok) {
-    throw new Error(`Transcription ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  const data = await res.json();
-
+function spanishReadTranscription(data) {
   // Derive a rough confidence so the coach still knows when NOT to treat
   // something as a learner error. verbose_json gives per-segment avg_logprob;
   // models that don't return it yield null, which the prompt reads as "unknown".
@@ -1886,8 +1940,26 @@ async function handleSpanishTurn(request, env, sessionId) {
           transcript  = cleanText(heard.text, 2000);
           confidence  = heard.confidence;
         } catch (e) {
-          console.error('Transcription failed', e);
-          return err(request, 'The coach could not hear that — try again.', 502);
+          // Log what a `wrangler tail` needs to settle this in one turn: the
+          // container the device sent, how much audio arrived, and the upstream
+          // reply. Without these, every cause looks like "bad microphone".
+          console.error('Transcription failed', {
+            kind: e?.kind || 'unknown',
+            content_type: contentType,
+            bytes: bytes.byteLength,
+            seconds: learnerSeconds,
+            message: e?.message,
+          });
+          // The child gets a plain sentence; the bracketed code tells a parent
+          // which of three very different problems they are looking at.
+          const kind = e?.kind;
+          return err(request,
+            kind === 'format'
+              ? 'This tablet records audio in a format the coach can’t read yet. [fmt]'
+            : kind === 'config'
+              ? 'The coach’s listening service isn’t set up right. [cfg]'
+              : 'The coach couldn’t reach its listening service — try that again. [net]',
+            502);
         }
       }
     } else {
@@ -1941,12 +2013,24 @@ async function handleSpanishTurn(request, env, sessionId) {
         cacheSystem: true,
       });
     } catch (e) {
-      console.error('Spanish turn failed', e);
-      return err(request, 'The coach had trouble hearing that — try again.', 502);
+      // This is the reply step, not the listening step. It used to say "had
+      // trouble hearing that", one word away from the transcription failure
+      // above, which made the two indistinguishable from a tablet.
+      console.error('Spanish turn failed', {
+        user: session.user_id,
+        turn: turnIndex,
+        heard_chars: transcript ? transcript.length : 0,
+        history: history.length,
+        message: e?.message,
+      });
+      return err(request, 'The coach heard you, but had trouble answering. [brain]', 502);
     }
 
     const replyText = cleanText(result.reply_text, 1200);
-    if (!replyText) return err(request, 'The coach had trouble replying — try again.', 502);
+    if (!replyText) {
+      console.error('Spanish turn returned no reply text', { user: session.user_id, turn: turnIndex });
+      return err(request, 'The coach heard you, but came back with nothing to say. [empty]', 502);
+    }
 
     await query(env,
       `INSERT INTO spanish_turns (session_id, turn_index, speaker, transcript, audio_seconds, phase)

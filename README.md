@@ -282,6 +282,27 @@ logprobs give a confidence score, so the coach still knows when a transcript is
 unreliable and must not treat it as a learner error. That protection is worth
 more than the ~$2/month a cheaper model would save.
 
+**When a turn fails, the message carries a code**, because "the coach couldn't
+hear you" was being shown for three unrelated causes and no tablet could tell
+them apart:
+
+| Code | Step | Means | Fix |
+| --- | --- | --- | --- |
+| `[fmt]` | Listening | The device recorded a container OpenAI won't decode | Read the container off the **Test microphone** line and add it to `spanishAudioExt` in `worker.js` |
+| `[cfg]` | Listening | Bad or missing `OPENAI_API_KEY`, or a retired STT model | Check the secret and `SPANISH_STT_MODEL` |
+| `[net]` | Listening | Transcription timed out or 5xx'd, twice | Upstream — retry the turn |
+| `[brain]` | Answering | Transcription **succeeded**; the Claude call failed | The mic is fine — look at the turn's context size and the logged message |
+| `[empty]` | Answering | Claude replied with no usable text | Usually a tool-schema drift; check the logged turn |
+
+The first three mean the coach never heard the child. The last two mean it heard
+them fine and fell over afterwards. Those used to be one word apart — "could not
+hear that" versus "had trouble hearing that" — which made a failing tablet
+impossible to place from the message alone.
+
+The Worker logs the container, byte count, and upstream reply on the listening
+failures, and the user, turn index, and transcript length on the answering ones,
+so `wrangler tail` names the cause on the first failing turn.
+
 **Every session follows a six-phase arc** on an injected clock, because a model
 left to free-converse asks *"¿Qué te gusta hacer?"* every day and runs dry by
 minute six:
