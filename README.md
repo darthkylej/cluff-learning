@@ -303,21 +303,43 @@ The Worker logs the container, byte count, and upstream reply on the listening
 failures, and the user, turn index, and transcript length on the answering ones,
 so `wrangler tail` names the cause on the first failing turn.
 
-**Every session follows a six-phase arc** on an injected clock, because a model
-left to free-converse asks *"¿Qué te gusta hacer?"* every day and runs dry by
-minute six:
+**The session clock counts speech, not wall time.** A countdown running against
+a child punishes the pause before a sentence, which is the exact moment they are
+assembling one — sessions were expiring with barely a word said in them. The
+clock now advances only by seconds the learner actually recorded, and only for
+holds that produced words: silence is free, thinking is free.
 
-| Phase | Window (of 15 min) | Purpose |
+Three consequences, all deliberate:
+
+- **Nothing cuts a session off.** No countdown, no forced end, no 409. It ends
+  when the child ends it. The month cap and `daily_session_cap` still bound the
+  spend, and they are checked before a session starts, not during one.
+- **The clock is invisible.** No timer on screen, no length promised on the home
+  screen, no minutes in the child's recap, and the `/turn` response carries no
+  clock at all — the page cannot display what it is never told. The coach is
+  instructed never to mention time, length, or progress aloud.
+- **A minute of speech is the floor.** Under it, the injected `[CLOCK]` line
+  tells the coach the session is not yet worth keeping and to draw the child out
+  with questions that want more than one word. It never says this to the child,
+  and nothing blocks them from leaving early.
+
+**Every session still follows a six-phase arc,** because a model left to
+free-converse asks *"¿Qué te gusta hacer?"* every day and runs dry quickly. The
+windows are fractions of a **speech** budget — `session_minutes × 0.2`, a
+learner's rough share of a conversation, floored at 60 seconds — so the parent's
+15/20/30 setting stretches the arc rather than redefining it:
+
+| Phase | Window (of 180s spoken) | Purpose |
 | --- | --- | --- |
-| Saludo | 0:00–1:30 | Fixed greeting ritual — builds automaticity |
-| Recuerdo | 1:30–3:00 | Callbacks from the lesson plan |
-| Tema | 3:00–8:00 | Today's curriculum unit, in real conversation |
-| Escena | 8:00–11:30 | Role-play the scenario |
-| Juego | 11:30–13:30 | A game using today's words |
-| Cierre | 13:30–15:00 | Recap, praise, preview, goodbye — never skipped |
+| Saludo | 0–18s | Fixed greeting ritual — builds automaticity |
+| Recuerdo | 18–36s | Callbacks from the lesson plan |
+| Tema | 36–95s | Today's curriculum unit, in real conversation |
+| Escena | 95–139s | Role-play the scenario |
+| Juego | 139–162s | A game using today's words |
+| Cierre | 162s+ | Recap, praise, preview, goodbye — never skipped |
 
-Phase windows are fractions, so a 20- or 30-minute setting stretches the arc
-rather than redefining it.
+Past the end of the arc the coach simply stays in Cierre for as long as the
+child keeps talking.
 
 **Memory.** After each session one Claude call writes the parent summary, the
 child's summary, and **the next session's lesson plan** — callback hooks drawn
@@ -330,8 +352,9 @@ proposes, the database decides.
 
 - Session creation is refused past `SPANISH_MONTHLY_AUDIO_MINUTES` (family-wide)
   or the learner's `daily_session_cap` — with a kind message, not an error.
-- A client timer force-ends at the session limit plus 30 seconds' grace, and
-  stale `active` rows are auto-abandoned on the next start.
+- Sessions are no longer bounded by length, so the month cap is now the real
+  ceiling rather than a backstop. Any still-`active` row is abandoned when the
+  learner starts their next session.
 - Every session accumulates audio seconds; the parent report shows month-to-date
   minutes and an estimated cost.
 

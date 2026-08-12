@@ -1398,21 +1398,54 @@ async function getSpanishProfile(env, userId) {
   return { user_id: userId, ...defaultSpanishProfile() };
 }
 
-// Which phase are we in, given seconds elapsed and the session length?
-function spanishPhase(elapsedSeconds, totalMinutes) {
-  const frac = totalMinutes > 0 ? elapsedSeconds / (totalMinutes * 60) : 1;
+/* ── The session clock counts speech, not wall time ─────────────
+   A wall clock punishes the pause before a sentence, which is the
+   exact moment a child is assembling one. Sessions were running out
+   with barely a word said in them. The clock now advances only while
+   the learner is actually recording, so thinking is free.
+
+   There is no cutoff. The clock chooses the phase and tells the coach
+   when a session has been worth having; the conversation ends when
+   the child ends it, or when it reaches its own natural close.
+──────────────────────────────────────────────────────────────── */
+
+// What a session should contain before it counts as one.
+const SPANISH_MIN_SPEAKING_SECONDS = 60;
+
+// A learner speaks perhaps a fifth of a conversation — the rest is the coach
+// talking, and the child listening, which is not idleness either. This turns
+// the parent-facing session_minutes setting into a speech budget, so that knob
+// keeps meaning something without anyone having to think in two units.
+const SPANISH_SPEAKING_RATIO = 0.2;
+
+function spanishSpeakingTarget(profile) {
+  const minutes = spanishNum(profile?.session_minutes, 5, 120, 15);
+  return Math.max(SPANISH_MIN_SPEAKING_SECONDS, minutes * 60 * SPANISH_SPEAKING_RATIO);
+}
+
+// Which phase are we in, given how much the learner has actually spoken?
+function spanishPhase(spokenSeconds, targetSeconds) {
+  const frac = targetSeconds > 0 ? spokenSeconds / targetSeconds : 1;
   return SPANISH_PHASES.find(p => frac < p.until) || SPANISH_PHASES[SPANISH_PHASES.length - 1];
 }
 
-// The coach cannot keep time; we tell it the time every turn.
-function spanishClockLine(elapsedSeconds, totalMinutes) {
-  const phase     = spanishPhase(elapsedSeconds, totalMinutes);
-  const minute    = Math.floor(elapsedSeconds / 60);
-  const remaining = totalMinutes * 60 - elapsedSeconds;
-  if (remaining <= 90) {
-    return `[CLOCK] ${Math.max(0, Math.round(remaining))} seconds remain. Phase: Cierre — begin the closing now. ${phase.brief}`;
-  }
-  return `[CLOCK] Minute ${minute} of ${totalMinutes}. Phase: ${phase.name} — ${phase.brief}`;
+// The coach cannot keep time; we tell it the time every turn. None of this may
+// reach the child — a session that narrates its own budget teaches a child to
+// watch the budget instead of the conversation.
+function spanishClockLine(spokenSeconds, targetSeconds) {
+  const phase  = spanishPhase(spokenSeconds, targetSeconds);
+  const spoken = Math.round(spokenSeconds);
+  const short  = SPANISH_MIN_SPEAKING_SECONDS - spoken;
+
+  const lines = [
+    `[CLOCK] The learner has spoken about ${spoken} seconds so far. Phase: ${phase.name} — ${phase.brief}`,
+    '[CLOCK] This budget counts only the learner\'s own speech; their silences cost nothing, so never rush them and never fill a pause for them.',
+    '[CLOCK] Say nothing about time, seconds, minutes, length, phases, or progress — not as praise, not as encouragement, not at the close. The learner must never discover that speaking more is what carries the session forward.',
+  ];
+  lines.push(short > 0
+    ? `[CLOCK] This session is not yet worth keeping — roughly ${short} more seconds of their speech would do it. Do not begin closing. Ask what invites a long answer: a story, a reason, a description, an opinion, and then follow the thread they offer.`
+    : '[CLOCK] They have spoken enough for this session to count. Follow the conversation while it holds their interest, and close warmly when it reaches its own end.');
+  return lines.join('\n');
 }
 
 // Estimated seconds of speech for a Spanish utterance (~15 chars/sec).
@@ -1570,6 +1603,12 @@ ENGLISH
 CLOCK
 - Each turn carries a [CLOCK] line with the phase. Obey it: finish your thought, then move on.
 - You may stretch a phase by one tick if the learner is deeply engaged, but NEVER skip the Cierre.
+- The clock measures only how long the learner has spoken. Their thinking time is free, so give
+  them room: never hurry them, never fill their silence, never treat a pause as a turn ending.
+- Nothing about the clock is visible to them and nothing about it may be spoken. Do not mention
+  time, length, progress, phases, or how much they have talked — not even as praise.
+- Nothing cuts a session off. When the [CLOCK] line says the session is not yet worth keeping,
+  stay in the conversation and draw them out with questions that want more than one word.
 
 LEARNER
 Comprehension ${p.comprehension_level} | Production ${p.production_level} | Correction ${p.correction_intensity}
@@ -1840,12 +1879,13 @@ async function handleCreateSpanishSession(request, env) {
     const scenarioKey = cleanKey(body.scenario_key) || 'free-talk';
     const profile     = await getSpanishProfile(env, session.user_id);
 
-    // Close out anything stale before counting.
+    // Close out anything still open before counting. Sessions no longer expire
+    // on a clock, so age is no longer evidence that one is stale — but starting
+    // a new one is, and a learner only ever has one going.
     await query(env,
       `UPDATE spanish_sessions SET status = 'abandoned', ended_at = NOW()
-        WHERE user_id = $1 AND status = 'active'
-          AND started_at < NOW() - make_interval(mins => $2)`,
-      [session.user_id, Number(profile.session_minutes) + 5]);
+        WHERE user_id = $1 AND status = 'active'`,
+      [session.user_id]);
 
     // Layer 1 — budget gates, before anything paid happens.
     const usage = await query(env,
@@ -1888,7 +1928,6 @@ async function handleCreateSpanishSession(request, env) {
     return json(request, {
       session_id:      sessionId,
       started_at:      created.rows[0].started_at,
-      session_minutes: Number(profile.session_minutes),
       scenario:        { key: ctx.scenario.key, title: ctx.scenario.title,
                          description: ctx.scenario.description },
       topic:           ctx.topic ? { key: ctx.topic.key, title: ctx.topic.title } : null,
@@ -1909,12 +1948,12 @@ async function handleSpanishTurn(request, env, sessionId) {
     const sess = sr.rows?.[0];
     if (!sess) return err(request, 'Active session not found.', 404);
 
-    const profile   = await getSpanishProfile(env, session.user_id);
-    const totalMin  = Number(profile.session_minutes);
-    const elapsed   = (Date.now() - new Date(sess.started_at).getTime()) / 1000;
-    if (elapsed > (totalMin * 60) + 30) {
-      return err(request, 'Session time is up.', 409);
-    }
+    const profile      = await getSpanishProfile(env, session.user_id);
+    const targetSecs   = spanishSpeakingTarget(profile);
+    // Speech already banked in this session. No turn is refused on time — a
+    // session ends when the child ends it, and the month cap in
+    // handleCreateSpanishSession is what keeps the spend bounded.
+    const spokenBefore = Number(sess.input_audio_seconds || 0);
 
     // Two input shapes. Browsers with the Web Speech API send JSON with a
     // transcript they produced; every other browser uploads raw audio and we
@@ -1970,7 +2009,12 @@ async function handleSpanishTurn(request, env, sessionId) {
       control        = cleanKey(body.control);    // slower | repeat | meaning | direct
       learnerSeconds = spanishNum(body.audio_seconds, 0, 300, 0);
     }
-    const phase = spanishPhase(elapsed, totalMin);
+    // Only speech that produced words counts. A child who holds the button for
+    // thirty seconds and says nothing has recorded silence, and silence is the
+    // thing this clock was rebuilt to stop charging them for.
+    const learnerSecs = transcript ? (learnerSeconds || spanishSpeechSeconds(transcript)) : 0;
+    const spokenSecs  = spokenBefore + learnerSecs;
+    const phase       = spanishPhase(spokenSecs, targetSecs);
 
     // Recent history keeps the prompt bounded on long sessions.
     const histR = await query(env,
@@ -1984,14 +2028,13 @@ async function handleSpanishTurn(request, env, sessionId) {
            (session_id, turn_index, speaker, transcript, transcript_confidence, audio_seconds, phase)
          VALUES ($1,$2,'learner',$3,$4,$5,$6)
          ON CONFLICT (session_id, turn_index, speaker) DO NOTHING`,
-        [sessionId, turnIndex, transcript, confidence,
-         learnerSeconds || spanishSpeechSeconds(transcript), phase.key]);
+        [sessionId, turnIndex, transcript, confidence, learnerSecs, phase.key]);
     }
 
     const ctx = await loadSpanishContext(env, session.user_id, sess.scenario_key);
     ctx.history = history;
 
-    let clockLine = spanishClockLine(elapsed, totalMin);
+    let clockLine = spanishClockLine(spokenSecs, targetSecs);
     if (control) {
       const extra = {
         slower:  'The learner pressed "slower". Speak more simply and slowly for the next few turns.',
@@ -2081,9 +2124,7 @@ async function handleSpanishTurn(request, env, sessionId) {
          correct ? 0.14 : 0.05]);
     }
 
-    const learnerSecs = transcript
-      ? (learnerSeconds || spanishSpeechSeconds(transcript)) : 0;
-    const coachSecs   = spanishSpeechSeconds(replyText);
+    const coachSecs = spanishSpeechSeconds(replyText);
     await query(env,
       `UPDATE spanish_sessions
           SET input_audio_seconds  = input_audio_seconds + $2,
@@ -2101,7 +2142,8 @@ async function handleSpanishTurn(request, env, sessionId) {
       turn_index: turnIndex,
       phase:      phase.key,
       phase_name: phase.name,
-      elapsed_seconds: Math.round(elapsed),
+      // No clock goes to the browser. The page cannot display what it is
+      // never told, which is the only reliable way to keep it invisible.
       corrected:  iv && iv.intervention_type !== 'ignore' ? iv.target_form || null : null,
     });
   });

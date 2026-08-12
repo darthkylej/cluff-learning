@@ -154,9 +154,6 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 .orb.rec svg{color:var(--green)}
 .orbhint{font-family:var(--font-mono);font-size:.58rem;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
 
-.timer{font-family:var(--font-mono);font-size:.8rem;color:var(--dim);letter-spacing:.08em}
-.timer b{color:var(--amber);font-weight:600}
-
 .controls{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.2rem}
 
 .transcript{max-height:230px;overflow-y:auto;padding:1rem 1.2rem;font-size:.86rem}
@@ -249,7 +246,7 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 
       <div class="startWrap">
         <button id="btnStart" class="bigStart">▶ Empezar</button>
-        <p style="margin:.9rem 0 0;color:var(--faint);font-size:.8rem" id="startHint">15 minutes of Spanish</p>
+        <p style="margin:.9rem 0 0;color:var(--faint);font-size:.8rem" id="startHint">Una conversación en español</p>
         <div style="margin-top:1.4rem;display:flex;flex-direction:column;align-items:center;gap:.5rem">
           <button class="btn ghost sm" id="btnMicCheck">🎤 Test microphone</button>
           <div class="levelbar" id="micBar"><i></i></div>
@@ -273,7 +270,6 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
         <div class="orbhint" id="orbHint">Hold to talk</div>
         <div class="levelbar" id="levelBar"><i></i></div>
         <div class="youline" id="youLine"></div>
-        <div class="timer">Time <b id="timeLeft">15:00</b></div>
       </div>
 
       <div class="controls">
@@ -597,9 +593,8 @@ async function postAudioTurn(rec,control){
    Session state
 ══════════════════════════════════════════════════════════════ */
 const S={
-  id:null, minutes:15, startedAt:0, turn:0, phases:[], phaseKey:null,
-  busy:false, ended:false, tick:null, transcript:[], showTranscript:false,
-  warned:false
+  id:null, startedAt:0, turn:0, phases:[], phaseKey:null,
+  busy:false, ended:false, transcript:[], showTranscript:false
 };
 
 function setState(kind,text){
@@ -641,22 +636,12 @@ function stopAudio(){
   try{ el.pause(); el.currentTime=0; }catch(e){}
 }
 
-function fmtTime(sec){
-  sec=Math.max(0,Math.round(sec));
-  return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
-}
-
-function startTimer(){
-  clearInterval(S.tick);
-  S.tick=setInterval(()=>{
-    const elapsed=(Date.now()-S.startedAt)/1000;
-    const left=S.minutes*60-elapsed;
-    $('timeLeft').textContent=fmtTime(left);
-    if(left<=90&&!S.warned){ S.warned=true; $('timeLeft').style.color='var(--rose)'; }
-    // Grace period, then force-end (Layer 2 of the budget guards).
-    if(left<=-30&&!S.ended){ endSession(true); }
-  },1000);
-}
+/* There is deliberately no timer here, and no clock arrives from the server
+   to build one from. A countdown on screen turns a conversation into a thing
+   to outlast, and it was running down hardest while a child stood there
+   thinking of how to say something — which is the work, not a delay from it.
+   The session's own clock counts only speech, and lives on the server where
+   nobody can watch it. */
 
 /* ══════════════════════════════════════════════════════════════
    Turn loop
@@ -679,7 +664,6 @@ async function sendTurn({transcript,confidence,seconds,control,audio}){
 
   if(res.error){
     S.busy=false;
-    if(res.status===409){ toast('Time is up — wrapping up.'); endSession(); return; }
     setState('','');
     toast(res.error,true);
     $('orb').classList.remove('off');
@@ -818,28 +802,26 @@ async function startSession(){
   }
 
   Object.assign(S,{
-    id:res.session_id, minutes:res.session_minutes||15,
+    id:res.session_id,
     startedAt:Date.now(), turn:0, phases:res.phases||[],
     phaseKey:(res.phases&&res.phases[0]&&res.phases[0].key)||null,
-    busy:false, ended:false, transcript:[], warned:false
+    busy:false, ended:false, transcript:[]
   });
   $('btnDirect').hidden = res.show_direct_button===false;
-  $('timeLeft').style.color='';
   $('transcript').innerHTML='';
   $('coachLine').textContent='…';
   $('youLine').textContent='';
   renderPhases();
   showScreen('live');
-  startTimer();
 
   // The coach opens: no learner turn yet.
   await sendTurn({transcript:null,confidence:null,seconds:0});
 }
 
-async function endSession(auto){
+// Only the child ends a session now — nothing times out from under them.
+async function endSession(){
   if(S.ended) return;
   S.ended=true;
-  clearInterval(S.tick);
   stopAudio();
   if(recActive) { try{ recog.stop(); }catch(e){} }
   $('orb').classList.add('off');
@@ -849,7 +831,7 @@ async function endSession(auto){
   if(res.error){ toast(res.error,true); showScreen('home'); loadHome(); return; }
 
   if(res.too_short){
-    toast(auto?'Session ended.':'That was too short to save.');
+    toast('That was too short to save.');
     showScreen('home'); loadHome(); return;
   }
 
@@ -858,9 +840,12 @@ async function endSession(auto){
   $('sumText').textContent=sum.learner_summary||'';
   $('sumPhrases').innerHTML=(sum.phrases_to_remember||[])
     .map(p=>`<div class="phrase">${esc(p)}</div>`).join('');
+  // Turns and words, never minutes. What they said is theirs to see; how long
+  // it took is a number for the Flight Deck, and a child who is shown it will
+  // start practising to it.
   const a=sum.aggregates||{};
   $('sumStats').textContent=
-    `${Math.round((a.duration_seconds||0)/60)} min · ${a.learner_turns||0} turnos · ${a.learner_words||0} palabras`;
+    `${a.learner_turns||0} turnos · ${a.learner_words||0} palabras`;
   showScreen('summary');
 }
 
@@ -889,11 +874,13 @@ async function loadHome(){
   }
   $('dayBar').innerHTML=bars.join('');
 
-  const mins=data.profile?.session_minutes||15;
-  $('startHint').textContent=mins+' minutes of Spanish';
+  // No length is promised anywhere on this screen. The session runs as long as
+  // the conversation does, and telling a child a number up front is telling
+  // them what to wait out.
+  $('startHint').textContent='Una conversación en español';
   $('heroSub').textContent = (st.minutes_today||0)>0
     ? '¡Ya practicaste hoy! Another session is always welcome.'
-    : 'Ready when you are — about '+mins+' minutes.';
+    : 'Ready when you are — talk as long as you like.';
 
   const plan=data.next_plan;
   if(plan){
