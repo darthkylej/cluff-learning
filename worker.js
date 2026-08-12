@@ -47,6 +47,10 @@
      GET    /spanish/reports/:studentId
      PATCH  /spanish/settings/:studentId
 
+     POST   /activity/beat
+     GET    /parents/overview
+     GET    /parents/students/:id
+
    Registration is closed. An email can only request a login code
    if a users row already exists for it — created either by a
    parent via /family/members/add, or by listing the address in
@@ -477,14 +481,22 @@ async function handleLeaveFamily(request, env) {
 // ── Tool handlers ──────────────────────────────────────────────
 async function handleListTools(request, env) {
   return withUser(request, env, async (session) => {
+    const family = await getMembership(env, session.user_id);
+    const isParent = family?.role === 'parent';
+    // `audience` is read through to_jsonb rather than as a plain
+    // column so this keeps working if the Worker is deployed before
+    // migration 004 runs — a missing column reads as NULL, and NULL
+    // means "everyone", which is what every older row is.
     const r = await query(env,
       `SELECT t.slug, t.name, t.tagline, t.description, t.glyph, t.accent, t.status, t.url,
+              COALESCE(to_jsonb(t) ->> 'audience', 'all') AS audience,
               COALESCE(ta.enabled, true) AS enabled
          FROM tools t
          LEFT JOIN tool_access ta ON ta.tool_slug = t.slug AND ta.user_id = $1
         ORDER BY t.sort_order, t.name`,
       [session.user_id]);
-    return json(request, { tools: r.rows || [] });
+    const tools = (r.rows || []).filter(t => t.audience !== 'parents' || isParent);
+    return json(request, { tools });
   });
 }
 
@@ -2342,6 +2354,367 @@ async function handlePatchSpanishSettings(request, env, studentId) {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════
+   FLIGHT DECK — the parent dashboard
+   ──────────────────────────────────────────────────────────────
+   Two ideas hold this up.
+
+   1. Time is measured by heartbeat, and the SERVER holds the
+      clock. A module beats every 45 seconds while its tab is
+      visible; the Worker credits the real elapsed gap, capped, so
+      a client that lies (or a laptop lid that closes) can't
+      inflate the number. Nothing has to remember to end a session.
+
+   2. Progress is READ, never re-recorded. Every module already
+      keeps its own real state — spelling scores, essay rows,
+      Spanish sessions — so the dashboard summarises those tables
+      instead of asking modules to report into a second one that
+      could drift out of step with the first.
+══════════════════════════════════════════════════════════════ */
+
+const BEAT_WINDOW_SECONDS = 150; // a longer gap than this starts a new visit
+const BEAT_MAX_CREDIT     = 75;  // the most a single beat can be worth
+
+// Builds "$3,$4,$5" for an IN list and appends the ids to `params`.
+// The Neon HTTP endpoint takes positional parameters only, so an
+// array parameter isn't an option.
+function idList(params, ids) {
+  const start = params.length;
+  for (const id of ids) params.push(id);
+  return ids.map((_, i) => `$${start + i + 1}`).join(',');
+}
+
+// "Today" has to mean the family's today, not UTC's — a Utah
+// evening is already tomorrow in UTC, and a dashboard that resets
+// at 6pm is a dashboard nobody trusts. The browser sends its IANA
+// zone; anything Postgres doesn't recognise falls back to UTC.
+async function resolveTimeZone(env, raw) {
+  const tz = String(raw || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/.test(tz)) return 'UTC';
+  try {
+    await query(env, `SELECT NOW() AT TIME ZONE $1`, [tz]);
+    return tz;
+  } catch { return 'UTC'; }
+}
+
+async function handleActivityBeat(request, env) {
+  return withUser(request, env, async (session) => {
+    const body = await request.json().catch(() => ({}));
+    const slug = String(body.tool || '').trim();
+    if (!/^[a-z0-9-]{1,40}$/.test(slug)) return err(request, 'Unknown module.');
+
+    // One statement: extend the open visit if there is one, open a
+    // new one if there isn't. Selecting the slug out of `tools`
+    // means an unrecognised module quietly records nothing rather
+    // than blowing up on a foreign key.
+    const r = await query(env, `
+      WITH open_visit AS (
+        SELECT id FROM module_sessions
+         WHERE user_id = $1 AND tool_slug = $2
+           AND last_beat_at > NOW() - make_interval(secs => $3::int)
+         ORDER BY last_beat_at DESC
+         LIMIT 1
+      ), extended AS (
+        UPDATE module_sessions m
+           SET seconds      = m.seconds + LEAST(EXTRACT(EPOCH FROM (NOW() - m.last_beat_at))::int, $4::int),
+               last_beat_at = NOW()
+          FROM open_visit o
+         WHERE m.id = o.id
+        RETURNING m.id, m.seconds
+      ), opened AS (
+        INSERT INTO module_sessions (user_id, tool_slug)
+        SELECT $1, t.slug FROM tools t
+         WHERE t.slug = $2 AND NOT EXISTS (SELECT 1 FROM open_visit)
+        RETURNING id, seconds
+      )
+      SELECT id, seconds FROM extended
+      UNION ALL
+      SELECT id, seconds FROM opened`,
+      [session.user_id, slug, BEAT_WINDOW_SECONDS, BEAT_MAX_CREDIT]);
+
+    const row = r.rows?.[0];
+    return json(request, { ok: !!row, seconds: Number(row?.seconds || 0) });
+  });
+}
+
+// Everything the overview needs about one family's learners, in a
+// handful of set-based queries rather than a few per child.
+async function handleParentsOverview(request, env) {
+  const guard = await requireParentSession(request, env);
+  if (guard.error) return guard.error;
+  const { family } = guard;
+
+  const tz = await resolveTimeZone(env, new URL(request.url).searchParams.get('tz'));
+
+  const learnersR = await query(env,
+    `SELECT u.id, u.email, u.display_name, u.avatar_key, u.feedback_level,
+            u.last_login_at, fm.added_at
+       FROM family_members fm
+       JOIN users u ON u.id = fm.user_id
+      WHERE fm.family_id = $1 AND fm.role = 'learner'
+      ORDER BY fm.added_at`,
+    [family.id]);
+  const learners = learnersR.rows || [];
+
+  // Whatever the learners can actually reach today. Bringing a new
+  // module online puts it on this dashboard with no code change —
+  // its time bar works immediately, and it simply has no progress
+  // line until one is written for it.
+  const toolsR = await query(env,
+    `SELECT t.slug, t.name, t.glyph, t.accent, t.status,
+            COALESCE(to_jsonb(t) ->> 'audience', 'all') AS audience
+       FROM tools t
+      WHERE t.status IN ('online', 'beta')
+      ORDER BY t.sort_order, t.name`);
+  const tools = (toolsR.rows || []).filter(t => t.audience !== 'parents');
+
+  if (!learners.length) {
+    return json(request, { family, timezone: tz, tools, students: [] });
+  }
+
+  const ids = learners.map(l => l.id);
+  const p = [tz];
+  const inIds = idList(p, ids);
+
+  const timeSql = `
+    WITH b AS (SELECT (date_trunc('day', NOW() AT TIME ZONE $1) AT TIME ZONE $1) AS day_start)
+    SELECT m.user_id, m.tool_slug,
+           SUM(m.seconds)::int AS total_seconds,
+           COALESCE(SUM(m.seconds) FILTER (WHERE m.started_at >= b.day_start), 0)::int              AS today_seconds,
+           COALESCE(SUM(m.seconds) FILTER (WHERE m.started_at >= NOW() - INTERVAL '7 days'), 0)::int  AS week_seconds,
+           COALESCE(SUM(m.seconds) FILTER (WHERE m.started_at >= NOW() - INTERVAL '30 days'), 0)::int AS month_seconds,
+           COUNT(*)::int AS visits,
+           MAX(m.last_beat_at) AS last_at
+      FROM module_sessions m CROSS JOIN b
+     WHERE m.user_id IN (${inIds})
+     GROUP BY m.user_id, m.tool_slug`;
+
+  const idOnly = [];
+  const inIdsAlone = idList(idOnly, ids);
+
+  const [timeR, bankR, spellR, mathR, essayR, assignedR, spanishR] = await Promise.all([
+    query(env, timeSql, p),
+    query(env, `SELECT COUNT(*)::int AS n FROM spelling_words`),
+    query(env, `
+      SELECT user_id,
+             COUNT(*)::int                                       AS attempted,
+             (COUNT(*) FILTER (WHERE score >= 5))::int            AS mastered,
+             (COUNT(*) FILTER (WHERE score BETWEEN 1 AND 4))::int AS learning,
+             (COUNT(*) FILTER (WHERE score <= 0))::int            AS shaky,
+             MAX(updated_at)                                      AS last_at
+        FROM spelling_word_scores
+       WHERE user_id IN (${inIdsAlone})
+       GROUP BY user_id`, idOnly),
+    query(env, `
+      SELECT user_id, state, updated_at
+        FROM tool_progress
+       WHERE tool_slug = 'math-facts' AND user_id IN (${inIdsAlone})`, idOnly),
+    query(env, `
+      SELECT user_id,
+             COUNT(*)::int                                          AS started,
+             (COUNT(*) FILTER (WHERE status = 'graded'))::int        AS graded,
+             ROUND(AVG(score_total) FILTER (WHERE status = 'graded'))::int AS avg_score,
+             MAX(graded_at)                                          AS last_graded_at,
+             MAX(GREATEST(draft_updated_at, COALESCE(graded_at, draft_updated_at))) AS last_at
+        FROM essays
+       WHERE user_id IN (${inIdsAlone})
+       GROUP BY user_id`, idOnly),
+    query(env, `
+      SELECT user_id, COUNT(*)::int AS assigned
+        FROM essay_assignment_targets
+       WHERE user_id IN (${inIdsAlone})
+       GROUP BY user_id`, idOnly),
+    query(env, `
+      SELECT p.user_id, p.total_sessions, p.total_seconds,
+             p.comprehension_level, p.production_level, p.weekly_minutes_goal,
+             (SELECT MAX(started_at) FROM spanish_sessions s
+               WHERE s.user_id = p.user_id AND s.status = 'completed') AS last_session_at,
+             (SELECT COALESCE(SUM(duration_seconds), 0)::int FROM spanish_sessions s
+               WHERE s.user_id = p.user_id AND s.status = 'completed'
+                 AND s.started_at >= NOW() - INTERVAL '7 days')        AS week_seconds
+        FROM spanish_profiles p
+       WHERE p.user_id IN (${inIdsAlone})`, idOnly),
+  ]);
+
+  const bank = Number(bankR.rows?.[0]?.n || 0);
+  const byUser = (rows, key = 'user_id') => {
+    const m = new Map();
+    for (const row of rows || []) m.set(String(row[key]), row);
+    return m;
+  };
+  const spell = byUser(spellR.rows), math = byUser(mathR.rows);
+  const essay = byUser(essayR.rows), assigned = byUser(assignedR.rows);
+  const spanish = byUser(spanishR.rows);
+
+  const timeByUser = new Map();
+  for (const row of timeR.rows || []) {
+    const k = String(row.user_id);
+    if (!timeByUser.has(k)) timeByUser.set(k, []);
+    timeByUser.get(k).push(row);
+  }
+
+  const students = learners.map(l => {
+    const k = String(l.id);
+    const rows = timeByUser.get(k) || [];
+    const sum = (field) => rows.reduce((a, r) => a + Number(r[field] || 0), 0);
+    const lastAt = rows.reduce((a, r) => {
+      const t = r.last_at ? new Date(r.last_at).getTime() : 0;
+      return t > a ? t : a;
+    }, 0);
+
+    const sp = spell.get(k), es = essay.get(k), sn = spanish.get(k);
+    const mathState = math.get(k)?.state || null;
+
+    return {
+      user: {
+        id: l.id, email: l.email, display_name: l.display_name,
+        avatar_key: l.avatar_key, feedback_level: l.feedback_level,
+        last_login_at: l.last_login_at, added_at: l.added_at,
+      },
+      last_active_at: lastAt ? new Date(lastAt).toISOString() : null,
+      time: {
+        today: sum('today_seconds'),
+        week:  sum('week_seconds'),
+        month: sum('month_seconds'),
+        total: sum('total_seconds'),
+        visits: sum('visits'),
+      },
+      by_tool: rows.map(r => ({
+        slug:   r.tool_slug,
+        today:  Number(r.today_seconds || 0),
+        week:   Number(r.week_seconds || 0),
+        month:  Number(r.month_seconds || 0),
+        total:  Number(r.total_seconds || 0),
+        visits: Number(r.visits || 0),
+        last_at: r.last_at,
+      })),
+      progress: {
+        'spelling-drill': sp ? {
+          bank, attempted: Number(sp.attempted), mastered: Number(sp.mastered),
+          learning: Number(sp.learning), shaky: Number(sp.shaky), last_at: sp.last_at,
+        } : { bank, attempted: 0, mastered: 0, learning: 0, shaky: 0, last_at: null },
+        'math-facts': mathState ? {
+          best: Number(mathState.best || 0),
+          runs: Number(mathState.runs || 0),
+          furthest: Number(mathState.furthest || 0),
+          ops: mathState.ops || null,
+          last_at: math.get(k)?.updated_at || null,
+        } : null,
+        'essay-coach': {
+          assigned: Number(assigned.get(k)?.assigned || 0),
+          started:  Number(es?.started || 0),
+          graded:   Number(es?.graded || 0),
+          avg_score: es?.avg_score == null ? null : Number(es.avg_score),
+          last_graded_at: es?.last_graded_at || null,
+          last_at: es?.last_at || null,
+        },
+        'spanish-tutor': sn ? {
+          sessions: Number(sn.total_sessions || 0),
+          minutes:  Math.round(Number(sn.total_seconds || 0) / 60),
+          week_minutes: Math.round(Number(sn.week_seconds || 0) / 60),
+          weekly_minutes_goal: Number(sn.weekly_minutes_goal || 0),
+          comprehension_level: sn.comprehension_level,
+          production_level:    sn.production_level,
+          last_session_at:     sn.last_session_at,
+        } : null,
+        'code-lab': null, // lives on another site; opens are all we can see
+      },
+    };
+  });
+
+  return json(request, { family, timezone: tz, tools, students });
+}
+
+// The drill-down for one learner. Same family, parent only.
+async function handleParentsStudent(request, env, studentId) {
+  const guard = await requireParentSession(request, env);
+  if (guard.error) return guard.error;
+  const { family } = guard;
+
+  const memberR = await query(env,
+    `SELECT u.id, u.email, u.display_name, u.avatar_key, u.feedback_level, u.last_login_at, fm.role
+       FROM family_members fm
+       JOIN users u ON u.id = fm.user_id
+      WHERE fm.family_id = $1 AND fm.user_id = $2`,
+    [family.id, studentId]);
+  const student = memberR.rows?.[0];
+  if (!student) return err(request, 'That learner is not in your family.', 403);
+
+  const tz = await resolveTimeZone(env, new URL(request.url).searchParams.get('tz'));
+
+  const [dailyR, visitsR, spellBandsR, weakR, bankR, mathR, essaysR, spanishR, skillsR, streak] = await Promise.all([
+    query(env, `
+      SELECT (m.started_at AT TIME ZONE $2)::date AS day, m.tool_slug, SUM(m.seconds)::int AS seconds
+        FROM module_sessions m
+       WHERE m.user_id = $1 AND m.started_at >= NOW() - INTERVAL '30 days'
+       GROUP BY 1, 2
+       ORDER BY 1`, [studentId, tz]),
+    query(env, `
+      SELECT tool_slug, started_at, last_beat_at, seconds
+        FROM module_sessions
+       WHERE user_id = $1
+       ORDER BY started_at DESC
+       LIMIT 25`, [studentId]),
+    query(env, `
+      SELECT COUNT(*)::int                                        AS attempted,
+             (COUNT(*) FILTER (WHERE score >= 5))::int             AS mastered,
+             (COUNT(*) FILTER (WHERE score BETWEEN 1 AND 4))::int  AS learning,
+             (COUNT(*) FILTER (WHERE score <= 0))::int             AS shaky
+        FROM spelling_word_scores WHERE user_id = $1`, [studentId]),
+    query(env, `
+      SELECT w.word, s.score, s.updated_at
+        FROM spelling_word_scores s
+        JOIN spelling_words w ON w.id = s.word_id
+       WHERE s.user_id = $1
+       ORDER BY s.score ASC, s.updated_at DESC
+       LIMIT 12`, [studentId]),
+    query(env, `SELECT COUNT(*)::int AS n FROM spelling_words`),
+    query(env, `SELECT state, updated_at FROM tool_progress WHERE user_id = $1 AND tool_slug = 'math-facts'`, [studentId]),
+    query(env, `
+      SELECT a.id, a.title, a.created_at,
+             COALESCE(e.status, 'not_started') AS status,
+             e.score_total, e.adaptive_score, e.graded_at, e.draft_updated_at,
+             e.coaching_completed_at
+        FROM essay_assignment_targets t
+        JOIN essay_assignments a ON a.id = t.assignment_id
+        LEFT JOIN essays e ON e.assignment_id = a.id AND e.user_id = t.user_id
+       WHERE t.user_id = $1
+       ORDER BY a.created_at DESC
+       LIMIT 20`, [studentId]),
+    query(env, `
+      SELECT id, started_at, duration_seconds, scenario_key, topic_key, summary
+        FROM spanish_sessions
+       WHERE user_id = $1 AND status = 'completed'
+       ORDER BY started_at DESC
+       LIMIT 10`, [studentId]),
+    query(env, `
+      SELECT skill_key, display_name, estimate, evidence_count, recurrence_count
+        FROM spanish_skills WHERE user_id = $1
+       ORDER BY recurrence_count DESC, estimate ASC
+       LIMIT 10`, [studentId]),
+    spanishStreak(env, studentId).catch(() => null),
+  ]);
+
+  return json(request, {
+    student,
+    timezone: tz,
+    daily: dailyR.rows || [],
+    visits: visitsR.rows || [],
+    spelling: {
+      bank: Number(bankR.rows?.[0]?.n || 0),
+      ...(spellBandsR.rows?.[0] || { attempted: 0, mastered: 0, learning: 0, shaky: 0 }),
+      weakest: weakR.rows || [],
+    },
+    math: mathR.rows?.[0] ? { state: mathR.rows[0].state, updated_at: mathR.rows[0].updated_at } : null,
+    essays: essaysR.rows || [],
+    spanish: {
+      streak,
+      recent_sessions: spanishR.rows || [],
+      skills: skillsR.rows || [],
+    },
+  });
+}
+
 // ── Router ─────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -2424,6 +2797,12 @@ export default {
 
       const spSettingsMatch = path.match(/^\/spanish\/settings\/([0-9a-fA-F-]{36})$/);
       if (spSettingsMatch && method === 'PATCH') return await handlePatchSpanishSettings(request, env, spSettingsMatch[1]);
+
+      if (path === '/activity/beat'    && method === 'POST') return await handleActivityBeat(request, env);
+      if (path === '/parents/overview' && method === 'GET')  return await handleParentsOverview(request, env);
+
+      const parentStudentMatch = path.match(/^\/parents\/students\/([0-9a-fA-F-]{36})$/);
+      if (parentStudentMatch && method === 'GET') return await handleParentsStudent(request, env, parentStudentMatch[1]);
 
       return err(request, 'Not found', 404);
     } catch (e) {

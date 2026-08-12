@@ -20,6 +20,7 @@ Browser  ──▶  index.html         GitHub Pages
 | File | Purpose |
 | --- | --- |
 | `index.html` | Access terminal + bridge homepage. No build step, no dependencies. |
+| `flight-deck.html` | Flight Deck — the parent/teacher dashboard. Parents only. |
 | `essay-coach.html` | Essay Coach module. |
 | `spanish-coach.html` | Spanish Coach module — voice conversation. |
 | `games/spell-invaders.html` | Spell Invaders module. |
@@ -65,18 +66,23 @@ Differences from condscript's auth, all deliberate:
 - `tools` — the module registry that renders the homepage grid
 - `tool_access` — per-learner enable/disable, set by a parent
 - `tool_progress` — generic `jsonb` state bucket, one row per (user, tool)
-- `activity_log` — append-only event stream for a future parent dashboard
+- `module_sessions` — one row per stretch of time someone spent in a module
+- `activity_log` — append-only event stream; still unused
 
 `tool_progress` is what the modules save into — one `jsonb` blob per (user,
-tool), so a new module needs no migration. `activity_log` is still scaffolding;
-nothing writes to it yet.
+tool), so a new module needs no migration. `activity_log` predates
+`module_sessions` and nothing writes to it.
 
 ## Setup
 
 ### 1. Database
 
 Create a Neon project, then paste `schema.sql` into the Neon SQL Editor and run
-it. Copy the **pooled** connection string.
+it, followed by each file in `migrations/` in numerical order. Every one of them
+is idempotent, so re-running is safe. Copy the **pooled** connection string.
+
+Run the migrations **before** deploying a Worker that needs them — `/parents/*`
+and `/activity/beat` query tables that migration 004 creates.
 
 ### 2. Worker
 
@@ -150,6 +156,9 @@ email. They can sign in from that point on.
 | PATCH | `/spanish/profile` | learner-owned preferences |
 | GET | `/spanish/reports/:studentId` | parent only, same family |
 | PATCH | `/spanish/settings/:studentId` | parent only, same family |
+| POST | `/activity/beat` | `{tool}` — time-on-task heartbeat |
+| GET | `/parents/overview` | parent only — every learner, every module |
+| GET | `/parents/students/:id` | parent only, same family — the drill-down |
 
 ## Modules
 
@@ -163,10 +172,53 @@ module online is an `UPDATE`, not a frontend change.
 | `math-facts` | online — `games/fact-runner.html` |
 | `essay-coach` | online — `essay-coach.html` |
 | `spanish-tutor` | online — `spanish-coach.html` (after migration 003) |
+| `flight-deck` | online — `flight-deck.html`, parents only (after migration 004) |
 | `typing-trainer` | standby |
+
+`tools.audience` is `all` or `parents`. `/tools` drops the parent-only rows for
+anyone who isn't one, so the Flight Deck never appears on a learner's grid —
+a module a kid can see but never open is just a locked door to rattle.
 
 Modules open in the **same tab** as the bridge, and each one carries a
 **← Bridge** button back. Nothing opens a new window.
+
+### Flight Deck
+
+The parent/teacher view. One card per learner showing time spent in each module
+over today / 7 days / 30 days / all time, plus where they actually stand in each
+one; click through for a 30-day chart, per-module detail, and recent visits.
+
+Two rules keep it honest.
+
+**Time is measured by heartbeat, and the server holds the clock.** Each module
+posts to `/activity/beat` every 45 seconds while its tab is *visible*, and the
+Worker credits the real elapsed gap since the last beat, capped at 75 seconds.
+A gap longer than 150 seconds opens a new visit instead of extending the old
+one, so a tab left open overnight doesn't read as an all-night study session.
+Nothing has to remember to end a session — a closed lid just stops beating.
+
+Consequences worth knowing:
+
+- The number is a slight **undercount**, by up to one beat interval per visit.
+  That is the right direction to be wrong in.
+- It measures time *with the module in front of them*, not time signed in, and
+  not time launched. A background tab counts for nothing.
+- **Code Lab** lives on another site and can't beat, so the bridge posts one
+  beat when it's launched. Its row shows visits, not minutes.
+- Spanish Coach time is **not** the same as the audio minutes the cost gates
+  meter — reading the recap is learning time and zero billable speech.
+
+**Progress is read, never re-recorded.** Every module already keeps real state —
+spelling scores, essay rows, Spanish sessions — so the dashboard summarises
+those tables directly. There is no second copy of the truth to drift out of
+step with the first, and no module had to be taught to report in.
+
+`"Today"` means the family's today: the browser sends its IANA timezone and the
+Worker buckets days in it. An unrecognised zone falls back to UTC.
+
+Bringing a new module online puts it on this dashboard with no code change — its
+time bar works immediately, and it simply carries no progress line until one is
+written for it.
 
 ### Fact Runner
 

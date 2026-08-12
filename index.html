@@ -1016,7 +1016,7 @@ async function loadTools() {
 
     return `
       <article class="tool ${usable ? 'live' : ''} ${t.enabled ? '' : 'locked'}"
-               data-accent="${esc(t.accent)}" data-url="${usable ? esc(t.url) : ''}"
+               data-accent="${esc(t.accent)}" data-slug="${esc(t.slug)}" data-url="${usable ? esc(t.url) : ''}"
                ${usable ? 'tabindex="0" role="link"' : ''}>
         <div class="tool-top">
           <div class="tool-glyph">${esc(t.glyph)}</div>
@@ -1032,9 +1032,25 @@ async function loadTools() {
 
 function launch(card) {
   const url = card.dataset.url;
+  if (!url) return;
+
+  // Code Lab lives on another site and can never send its own
+  // heartbeat, so this launch is the only thing the Flight Deck
+  // will ever see of it. The local modules beat for themselves —
+  // this one lands inside the same visit and costs nothing.
+  const token = localStorage.getItem(TOKEN_KEY);
+  const slug  = card.dataset.slug;
+  if (token && slug) {
+    fetch(API_URL + '/activity/beat', {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ tool: slug }),
+    }).catch(() => {});
+  }
+
   // Same tab, on purpose — each module carries its own "Back to Bridge"
   // control, so stacking up tabs buys nothing.
-  if (url) location.href = url;
+  location.href = url;
 }
 $('toolGrid').addEventListener('click', e => {
   const card = e.target.closest('.tool.live');

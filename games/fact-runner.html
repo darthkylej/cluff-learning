@@ -1020,6 +1020,37 @@ $('btnSignOut').addEventListener('click', async () => {
   location.href = '../index.html';
 });
 
+/* ══════════════════════════════════════════════════════════════
+   Time on task — the heartbeat the Flight Deck reads
+   The Worker holds the clock and decides what each beat is worth,
+   so a closed lid simply stops counting. Nothing to end, nothing
+   to trust from this side.
+══════════════════════════════════════════════════════════════ */
+(function timeOnTask(){
+  const EVERY = 45000;
+  let timer = null, last = 0;
+  function beat(force){
+    const token = localStorage.getItem(TOKEN_KEY);
+    if(!token) return;
+    const now = Date.now();
+    if(!force && now - last < EVERY - 2000) return;
+    last = now;
+    fetch(API_URL + '/activity/beat', { method:'POST', keepalive:true,
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + token },
+      body: JSON.stringify({ tool: SLUG }) }).catch(() => {});
+  }
+  function run(){
+    clearInterval(timer);
+    if(document.visibilityState === 'visible'){ beat(); timer = setInterval(beat, EVERY); }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'hidden') beat(true);
+    run();
+  });
+  addEventListener('pagehide', () => beat(true));
+  run();
+})();
+
 boot();
 </script>
 </body>

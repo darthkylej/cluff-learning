@@ -1027,6 +1027,38 @@ addEventListener('beforeunload',()=>{
   }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   Time on task — the heartbeat the Flight Deck reads
+   This counts time spent in the module, which is not the same as
+   the audio minutes the cost gates meter. A child reading the
+   recap for five minutes is five minutes of learning and zero
+   minutes of billable speech.
+══════════════════════════════════════════════════════════════ */
+(function timeOnTask(){
+  const BEAT_SLUG='spanish-tutor', EVERY=45000;
+  let timer=null, last=0;
+  function beat(force){
+    const token=localStorage.getItem(TOKEN_KEY);
+    if(!token) return;
+    const now=Date.now();
+    if(!force && now-last<EVERY-2000) return;
+    last=now;
+    fetch(API_URL+'/activity/beat',{ method:'POST', keepalive:true,
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+      body:JSON.stringify({ tool:BEAT_SLUG }) }).catch(()=>{});
+  }
+  function run(){
+    clearInterval(timer);
+    if(document.visibilityState==='visible'){ beat(); timer=setInterval(beat,EVERY); }
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden') beat(true);
+    run();
+  });
+  addEventListener('pagehide',()=>beat(true));
+  run();
+})();
+
 boot();
 </script>
 </body>

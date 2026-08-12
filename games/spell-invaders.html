@@ -2290,6 +2290,35 @@ document.getElementById('wbList').addEventListener('click',async e=>{
   await WORDBANK.load(); renderWordBankList();
 });
 
+/* ============ time on task ============
+   A heartbeat every 45s while this tab is in front. The Worker
+   holds the clock and decides what each beat is worth, so a
+   closed tab just stops counting — there is no session to end. */
+(function timeOnTask(){
+  const BEAT_SLUG='spelling-drill', EVERY=45000;
+  let timer=null, last=0;
+  function beat(force){
+    const token=localStorage.getItem(TOKEN_KEY);
+    if(!token) return;
+    const now=Date.now();
+    if(!force && now-last<EVERY-2000) return;
+    last=now;
+    fetch(API_URL+'/activity/beat',{ method:'POST', keepalive:true,
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+      body:JSON.stringify({ tool:BEAT_SLUG }) }).catch(()=>{});
+  }
+  function run(){
+    clearInterval(timer);
+    if(document.visibilityState==='visible'){ beat(); timer=setInterval(beat,EVERY); }
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden') beat(true);
+    run();
+  });
+  addEventListener('pagehide',()=>beat(true));
+  run();
+})();
+
 bootAuth();
 </script>
 </body>

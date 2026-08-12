@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#04070f">
+<title>Flight Deck — Cluff Learning Systems</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23050912'/><path d='M16 5 L26 27 L16 22 L6 27 Z' fill='%23f5a524'/></svg>">
+<style>
+/* ══════════════════════════════════════════════════════════════
+   FLIGHT DECK — parents only. Shares the bridge design system.
+   Self-contained: no external fonts, scripts, or stylesheets.
+══════════════════════════════════════════════════════════════ */
+:root{
+  --void:#04070f; --deep:#070c18;
+  --panel:rgba(9,16,31,.74); --panel-solid:#0a1120; --raise:rgba(19,32,56,.6);
+  --line:rgba(79,209,224,.16); --line-mid:rgba(79,209,224,.30); --line-hot:rgba(79,209,224,.55);
+  --text:#dce8f6; --text-bright:#f2f8ff; --dim:#7b95b4; --faint:#4e6485;
+  --cyan:#4fd1e0; --amber:#f5a524; --violet:#a78bfa; --green:#34d399; --rose:#fb7185;
+  --font-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono',Consolas,'Liberation Mono',monospace;
+  --r:4px; --ease:cubic-bezier(.22,.9,.28,1);
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;min-height:100%;background:var(--void);color:var(--text);font-family:var(--font-ui);
+  font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+#starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+.ambient{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(900px 620px at 12% -8%, rgba(245,165,36,.10), transparent 62%),
+             radial-gradient(760px 540px at 92% 4%, rgba(79,209,224,.12), transparent 60%),
+             radial-gradient(1100px 700px at 50% 118%, rgba(167,139,250,.07), transparent 65%)}
+.vignette{position:fixed;inset:0;z-index:1;pointer-events:none;box-shadow:inset 0 0 220px 40px rgba(0,0,0,.85)}
+
+.panel{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.panel::before,.panel::after{content:'';position:absolute;width:16px;height:16px;pointer-events:none;
+  border-color:var(--line-hot);border-style:solid;border-width:0}
+.panel::before{top:-1px;left:-1px;border-top-width:1px;border-left-width:1px}
+.panel::after{bottom:-1px;right:-1px;border-bottom-width:1px;border-right-width:1px}
+
+.label{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.26em;text-transform:uppercase;color:var(--faint)}
+.rule{height:1px;background:linear-gradient(90deg,var(--line-mid),transparent);border:0;margin:0}
+.led{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);
+  box-shadow:0 0 8px var(--amber);animation:pulse 2.4s var(--ease) infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.32}}
+
+.btn{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:.72rem;letter-spacing:.18em;
+  text-transform:uppercase;padding:.72rem 1.35rem;border-radius:var(--r);border:1px solid var(--line-mid);
+  background:linear-gradient(180deg,rgba(79,209,224,.14),rgba(79,209,224,.05));color:var(--cyan);
+  transition:all .18s var(--ease)}
+.btn:hover:not(:disabled){border-color:var(--line-hot);background:linear-gradient(180deg,rgba(79,209,224,.24),rgba(79,209,224,.09));
+  color:var(--text-bright);box-shadow:0 0 20px -6px rgba(79,209,224,.55)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--dim)}
+.btn.ghost:hover{border-color:var(--line-mid);color:var(--text);box-shadow:none;background:rgba(79,209,224,.05)}
+.btn.sm{padding:.44rem .85rem;font-size:.63rem;letter-spacing:.15em}
+a.btn{text-decoration:none;display:inline-block}
+
+#authGate{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
+  background:var(--void);color:var(--dim);font-family:var(--font-mono);font-size:.72rem;
+  letter-spacing:.22em;text-transform:uppercase}
+
+#app{position:relative;z-index:2;min-height:100dvh;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:1.25rem;
+  padding:.85rem clamp(1rem,4vw,2.5rem);background:rgba(5,9,18,.82);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
+.mark{display:flex;align-items:center;gap:.7rem;text-decoration:none;color:inherit}
+.mark svg{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 8px rgba(245,165,36,.4))}
+.mark-text{min-width:0;line-height:1.25}
+.mark-name{font-size:.84rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-bright)}
+.mark-sub{font-family:var(--font-mono);font-size:.53rem;letter-spacing:.26em;color:var(--amber);text-transform:uppercase;margin-top:.15rem}
+.topbar-spacer{flex:1}
+.userchip{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.08em;color:var(--dim)}
+.userchip b{color:var(--amber);font-weight:600}
+
+main{flex:1;width:100%;max-width:1180px;margin:0 auto;padding:clamp(1.75rem,5vw,3rem) clamp(1rem,4vw,2.5rem) 4rem}
+
+.hero{margin-bottom:1.75rem}
+.hero .label{display:flex;align-items:center;gap:.55rem}
+.hero h1{font-size:clamp(1.6rem,4vw,2.3rem);font-weight:600;letter-spacing:-.015em;line-height:1.15;
+  margin:.6rem 0 .4rem;color:var(--text-bright)}
+.hero h1 .accent{background:linear-gradient(96deg,var(--amber),var(--cyan));-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.hero p{margin:0;max-width:66ch;color:var(--dim);font-size:.95rem}
+
+.sec-head{display:flex;align-items:baseline;gap:1rem;margin:0 0 1.1rem}
+.sec-head h2{font-size:.88rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--text-bright);margin:0}
+.sec-head .rule{flex:1;align-self:center}
+.sec-head .count{font-family:var(--font-mono);font-size:.62rem;letter-spacing:.16em;color:var(--faint);white-space:nowrap}
+
+.screen{display:none}
+.screen.active{display:block;animation:screenIn .3s var(--ease)}
+@keyframes screenIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* range selector */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:1.6rem}
+.seg button{appearance:none;cursor:pointer;background:transparent;border:0;border-right:1px solid var(--line);
+  color:var(--dim);font-family:var(--font-mono);font-size:.63rem;letter-spacing:.16em;text-transform:uppercase;
+  padding:.55rem 1rem;transition:all .18s var(--ease)}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--text);background:rgba(79,209,224,.06)}
+.seg button.on{background:rgba(245,165,36,.14);color:var(--amber)}
+
+/* student cards */
+.roster{display:flex;flex-direction:column;gap:1.1rem}
+.student{padding:1.35rem 1.45rem}
+.st-top{display:flex;align-items:flex-start;gap:.9rem;flex-wrap:wrap}
+.avatar{width:38px;height:38px;flex:none;display:grid;place-items:center;font-size:1.05rem;font-weight:600;
+  color:var(--amber);background:rgba(245,165,36,.10);border:1px solid var(--line-mid);border-radius:var(--r)}
+.st-id{min-width:0;flex:1}
+.st-name{font-size:1.05rem;font-weight:600;color:var(--text-bright);line-height:1.2}
+.st-mail{font-family:var(--font-mono);font-size:.66rem;color:var(--faint);letter-spacing:.04em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-time{text-align:right}
+.st-time .big{font-size:1.5rem;font-weight:600;color:var(--amber);line-height:1.1;font-variant-numeric:tabular-nums}
+.st-time .sub{font-family:var(--font-mono);font-size:.58rem;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+
+.split{display:flex;height:6px;border-radius:3px;overflow:hidden;background:rgba(79,209,224,.07);margin:1.05rem 0 1.1rem}
+.split i{display:block;height:100%}
+.split.empty{background:repeating-linear-gradient(90deg,rgba(79,209,224,.10) 0 6px,transparent 6px 12px)}
+
+.mods{display:flex;flex-direction:column;gap:.1rem}
+.mod{display:flex;align-items:center;gap:.8rem;padding:.5rem .55rem;border-radius:var(--r);
+  border-top:1px solid rgba(79,209,224,.07)}
+.mod:first-child{border-top:0}
+.mod .glyph{width:26px;height:26px;flex:none;display:grid;place-items:center;font-size:.9rem;
+  border-radius:3px;background:rgba(255,255,255,.03);border:1px solid var(--line)}
+.mod .nm{width:9.5rem;flex:none;font-size:.86rem;color:var(--text-bright);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.mod .st{flex:1;min-width:0;font-size:.82rem;color:var(--dim)}
+.mod .st b{color:var(--text);font-weight:500}
+.mod .st .quiet{color:var(--faint)}
+.mod .tm{font-family:var(--font-mono);font-size:.78rem;color:var(--text);font-variant-numeric:tabular-nums;
+  white-space:nowrap;min-width:4.5rem;text-align:right}
+.mod .tm.zero{color:var(--faint)}
+
+.st-foot{display:flex;align-items:center;gap:1rem;margin-top:1.1rem;padding-top:.9rem;
+  border-top:1px solid var(--line);flex-wrap:wrap}
+.seen{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;color:var(--faint);flex:1}
+.seen b{color:var(--cyan);font-weight:500}
+
+.empty{padding:2.5rem 1.5rem;text-align:center;border:1px dashed var(--line-mid);border-radius:var(--r);
+  color:var(--dim);font-size:.88rem}
+.empty b{color:var(--text-bright);font-weight:600;display:block;margin-bottom:.4rem}
+
+/* detail */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;margin-bottom:1.9rem}
+.tile{padding:1rem 1.1rem}
+.tile .k{font-family:var(--font-mono);font-size:.58rem;letter-spacing:.2em;text-transform:uppercase;color:var(--faint);margin-bottom:.35rem}
+.tile .v{font-size:1.35rem;font-weight:600;color:var(--text-bright);line-height:1.15;font-variant-numeric:tabular-nums}
+.tile .n{font-size:.76rem;color:var(--dim);margin-top:.2rem}
+
+.chart{padding:1.2rem 1.3rem 1rem;margin-bottom:1.9rem}
+.bars{display:flex;align-items:flex-end;gap:2px;height:132px;margin:.6rem 0 .5rem}
+.bars .col{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;
+  border-radius:2px 2px 0 0;overflow:hidden;background:rgba(79,209,224,.045)}
+.bars .col i{display:block;width:100%}
+.bars .col.today{outline:1px solid var(--line-mid);outline-offset:0}
+.axis{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:.56rem;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.legend{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--line)}
+.legend span{display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--dim)}
+.legend i{width:9px;height:9px;border-radius:2px;display:block}
+
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;margin-bottom:1.9rem}
+.mpanel{padding:1.2rem 1.3rem}
+.mpanel h3{margin:0 0 .2rem;font-size:.95rem;font-weight:600;color:var(--text-bright);display:flex;align-items:center;gap:.55rem}
+.mpanel h3 .g{font-size:1.05rem}
+.mpanel .when{font-family:var(--font-mono);font-size:.6rem;letter-spacing:.12em;color:var(--faint);margin-bottom:.9rem}
+.stat-row{display:flex;flex-wrap:wrap;gap:1.2rem;margin-bottom:.9rem}
+.stat{min-width:64px}
+.stat .k{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+.stat .v{font-size:1.05rem;font-weight:600;color:var(--text-bright);font-variant-numeric:tabular-nums}
+.bands{display:flex;height:7px;border-radius:3px;overflow:hidden;background:rgba(79,209,224,.07);margin:.2rem 0 .7rem}
+.bands i{display:block;height:100%}
+.wordlist{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}
+.word{font-family:var(--font-mono);font-size:.72rem;padding:.22rem .5rem;border-radius:2px;
+  border:1px solid rgba(251,113,133,.3);color:#ffc2cb;background:rgba(251,113,133,.07)}
+.word.warm{border-color:rgba(245,165,36,.3);color:#ffdca8;background:rgba(245,165,36,.07)}
+.rows{display:flex;flex-direction:column;gap:.1rem}
+.row{display:flex;align-items:center;gap:.7rem;font-size:.83rem;padding:.42rem 0;border-top:1px solid rgba(79,209,224,.07)}
+.row:first-child{border-top:0}
+.row .t{flex:1;min-width:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .m{font-family:var(--font-mono);font-size:.7rem;color:var(--faint);white-space:nowrap}
+.chip{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.14em;text-transform:uppercase;
+  padding:.22rem .5rem;border-radius:2px;white-space:nowrap;border:1px solid currentColor}
+.chip.not_started{color:var(--faint)}
+.chip.draft{color:var(--amber)}
+.chip.grading{color:var(--violet)}
+.chip.graded{color:var(--green)}
+.note{font-size:.8rem;color:var(--faint);line-height:1.5;margin-top:.7rem}
+.bar-mini{height:5px;border-radius:3px;background:rgba(79,209,224,.08);overflow:hidden;margin-top:.3rem}
+.bar-mini i{display:block;height:100%;background:var(--violet)}
+
+#toast{position:fixed;left:50%;bottom:2rem;transform:translate(-50%,120%);z-index:90;max-width:min(90vw,420px);
+  padding:.8rem 1.15rem;font-size:.86rem;background:var(--panel-solid);border:1px solid var(--line-mid);
+  border-left:2px solid var(--amber);border-radius:var(--r);box-shadow:0 18px 50px -18px rgba(0,0,0,.95);
+  transition:transform .3s var(--ease)}
+#toast.show{transform:translate(-50%,0)}
+#toast.bad{border-left-color:var(--rose)}
+
+@media (max-width:640px){
+  .topbar{gap:.6rem;padding:.7rem 1rem}
+  .mark-text{display:none}
+  .mod .nm{width:auto;flex:1}
+  .mod .st{display:none}
+  .st-time{text-align:left}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;
+  animation-iteration-count:1!important;transition-duration:.001ms!important}}
+</style>
+</head>
+<body>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+<div class="ambient" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<div id="authGate">Verifying clearance…</div>
+
+<div id="app" style="display:none">
+  <header class="topbar">
+    <a class="mark" href="index.html">
+      <svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M24 3 L44 43 L24 34 L4 43 Z" fill="url(#gfd)"/>
+        <path d="M24 12 L36 38 L24 32 L12 38 Z" fill="#04070f"/>
+        <circle cx="24" cy="27" r="3.2" fill="#f5a524"/>
+        <defs><linearGradient id="gfd" x1="4" y1="3" x2="44" y2="43">
+          <stop stop-color="#f5a524"/><stop offset="1" stop-color="#4fd1e0"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="mark-text"><span class="mark-name">Cluff Learning</span><span class="mark-sub">Flight Deck</span></span>
+    </a>
+    <a class="btn ghost sm" href="index.html">← Bridge</a>
+    <div class="topbar-spacer"></div>
+    <span class="userchip">Signed in as <b id="userChipName">—</b></span>
+    <button id="btnSignOut" class="btn ghost sm">Sign out</button>
+  </header>
+
+  <main>
+    <!-- ── OVERVIEW ── -->
+    <section id="screen-roster" class="screen active">
+      <div class="hero">
+        <div class="label"><i class="led"></i> <span id="stardate">—</span></div>
+        <h1>Flight <span class="accent">Deck</span></h1>
+        <p>Where every learner stands in every module, and how long they have spent there.
+           Time is measured while a module is open and in front of them — not from when it was launched.</p>
+      </div>
+
+      <div class="seg" id="rangeSeg">
+        <button data-range="today">Today</button>
+        <button data-range="week" class="on">7 days</button>
+        <button data-range="month">30 days</button>
+        <button data-range="total">All time</button>
+      </div>
+
+      <div class="sec-head">
+        <h2>Learners</h2>
+        <div class="rule"></div>
+        <div class="count" id="rosterCount">—</div>
+      </div>
+      <div class="roster" id="roster"></div>
+    </section>
+
+    <!-- ── STUDENT DETAIL ── -->
+    <section id="screen-student" class="screen">
+      <button class="btn ghost sm" id="btnBackRoster" style="margin-bottom:1.4rem">← All learners</button>
+      <div class="hero">
+        <div class="label" id="dtLabel">Learner</div>
+        <h1 id="dtName">—</h1>
+        <p id="dtSub">—</p>
+      </div>
+      <div class="tiles" id="dtTiles"></div>
+      <div class="panel chart" id="dtChart"></div>
+      <div class="sec-head"><h2>Module by module</h2><div class="rule"></div></div>
+      <div class="panels" id="dtPanels"></div>
+      <div class="sec-head"><h2>Recent visits</h2><div class="rule"></div></div>
+      <div class="panel" style="padding:1.1rem 1.3rem" id="dtVisits"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   CONFIG + API
+══════════════════════════════════════════════════════════════ */
+const API_URL='https://cluff-learning-api.kylecluff.workers.dev';
+const TOKEN_KEY='cls_jwt';
+const SLUG='flight-deck';
+const TZ=(function(){ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'; }catch(e){ return 'UTC'; } })();
+
+let ME=null;
+let OVERVIEW=null;
+let RANGE='week';
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(method,path,body){
+  const opts={ method, headers:{ 'Content-Type':'application/json' } };
+  const token=localStorage.getItem(TOKEN_KEY);
+  if(token) opts.headers['Authorization']='Bearer '+token;
+  if(body!==undefined) opts.body=JSON.stringify(body);
+  try{
+    const res=await fetch(API_URL+path,opts);
+    const text=await res.text();
+    let data={};
+    try{ data=text?JSON.parse(text):{}; }catch(e){ data={ error:text||('HTTP '+res.status) }; }
+    if(!res.ok) return { error:data.error||('HTTP '+res.status), status:res.status };
+    return data;
+  }catch(e){ return { error:e.message||'Network error' }; }
+}
+
+let toastTimer;
+function toast(msg,bad){
+  const el=$('toast'); el.textContent=msg; el.classList.toggle('bad',!!bad); el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),3600);
+}
+
+/* ── Formatting ─────────────────────────────────────────────── */
+function fmtDur(sec){
+  sec=Math.max(0,Math.round(Number(sec)||0));
+  if(sec===0) return '—';
+  if(sec<60) return '<1m';
+  const h=Math.floor(sec/3600), m=Math.round((sec%3600)/60);
+  if(h && m) return h+'h '+m+'m';
+  if(h) return h+'h';
+  return m+'m';
+}
+function relTime(ts){
+  if(!ts) return 'never';
+  const then=new Date(ts).getTime();
+  if(!then) return 'never';
+  const mins=Math.round((Date.now()-then)/60000);
+  if(mins<1) return 'just now';
+  if(mins<60) return mins+'m ago';
+  const hrs=Math.round(mins/60);
+  if(hrs<24) return hrs+'h ago';
+  const days=Math.round(hrs/24);
+  if(days<30) return days+'d ago';
+  return new Date(ts).toLocaleDateString(undefined,{ month:'short', day:'numeric' });
+}
+function dayKey(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function normDay(v){
+  // Postgres hands back a date; be tolerant of a full timestamp too.
+  return String(v||'').slice(0,10);
+}
+
+const ACCENT={ cyan:'var(--cyan)', amber:'var(--amber)', violet:'var(--violet)',
+               green:'var(--green)', rose:'var(--rose)' };
+function accentOf(slug){
+  const t=(OVERVIEW&&OVERVIEW.tools||[]).find(x=>x.slug===slug);
+  return ACCENT[t&&t.accent]||'var(--cyan)';
+}
+function toolMeta(slug){
+  const t=(OVERVIEW&&OVERVIEW.tools||[]).find(x=>x.slug===slug);
+  return t||{ slug, name:slug, glyph:'◈', accent:'cyan' };
+}
+
+const RANGE_LABEL={ today:'today', week:'in the last 7 days', month:'in the last 30 days', total:'all time' };
+
+/* ══════════════════════════════════════════════════════════════
+   Starfield (matches the bridge)
+══════════════════════════════════════════════════════════════ */
+(function starfield(){
+  const canvas=$('starfield'); const ctx=canvas.getContext('2d');
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let stars=[], w=0, h=0, dpr=1;
+  function resize(){
+    dpr=Math.min(devicePixelRatio||1,2); w=innerWidth; h=innerHeight;
+    if(!w||!h){ stars=[]; return; }
+    canvas.width=w*dpr; canvas.height=h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    const count=Math.round((w*h)/13000);
+    stars=Array.from({length:count},()=>({ x:Math.random()*w,y:Math.random()*h,r:Math.random()*1.1+.25,
+      a:Math.random()*.5+.12,v:Math.random()*.02+.004,p:Math.random()*Math.PI*2 }));
+  }
+  function draw(t){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      const tw=reduce?1:.68+.32*Math.sin(t/900+s.p);
+      ctx.globalAlpha=s.a*tw; ctx.fillStyle=s.r>1.0?'#f0d3a0':'#dce8f6';
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+      if(!reduce){ s.y-=s.v; if(s.y<-2){ s.y=h+2; s.x=Math.random()*w; } }
+    }
+    ctx.globalAlpha=1; requestAnimationFrame(draw);
+  }
+  addEventListener('resize',resize,{passive:true}); resize(); requestAnimationFrame(draw);
+})();
+
+/* ══════════════════════════════════════════════════════════════
+   Boot / auth — parents only
+══════════════════════════════════════════════════════════════ */
+async function boot(){
+  const token=localStorage.getItem(TOKEN_KEY);
+  if(!token){ location.href='index.html'; return; }
+  const me=await api('GET','/auth/me');
+  if(me.error||!me.user){ localStorage.removeItem(TOKEN_KEY); location.href='index.html'; return; }
+  ME=me.user;
+  // The Worker enforces this too; bouncing here just avoids showing
+  // a learner a screen full of errors.
+  if(!ME.family||ME.role!=='parent'){ location.href='index.html'; return; }
+
+  $('userChipName').textContent=ME.display_name||ME.email;
+  $('stardate').textContent=new Date().toLocaleDateString(undefined,
+    { weekday:'long', month:'long', day:'numeric' });
+  $('authGate').style.display='none';
+  $('app').style.display='';
+  await loadOverview();
+}
+$('btnSignOut').onclick=async()=>{ await api('POST','/auth/logout'); localStorage.removeItem(TOKEN_KEY); location.href='index.html'; };
+
+const screens={ roster:$('screen-roster'), student:$('screen-student') };
+function show(n){
+  Object.values(screens).forEach(s=>s.classList.remove('active'));
+  screens[n].classList.add('active');
+  scrollTo(0,0);
+}
+$('btnBackRoster').onclick=()=>show('roster');
+
+/* ══════════════════════════════════════════════════════════════
+   Overview
+══════════════════════════════════════════════════════════════ */
+async function loadOverview(){
+  $('roster').innerHTML='<div class="empty">Reading the logs…</div>';
+  const r=await api('GET','/parents/overview?tz='+encodeURIComponent(TZ));
+  if(r.error){
+    $('roster').innerHTML='<div class="empty"><b>Could not load the dashboard</b>'+esc(r.error)+'</div>';
+    $('rosterCount').textContent='';
+    return;
+  }
+  OVERVIEW=r;
+  renderRoster();
+}
+
+$('rangeSeg').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-range]'); if(!b) return;
+  RANGE=b.dataset.range;
+  [...$('rangeSeg').children].forEach(c=>c.classList.toggle('on',c===b));
+  renderRoster();
+});
+
+function renderRoster(){
+  const students=OVERVIEW.students||[];
+  const active=students.filter(s=>s.time[RANGE]>0).length;
+  $('rosterCount').textContent=students.length
+    ? active+' of '+students.length+' active '+RANGE_LABEL[RANGE]
+    : '';
+
+  if(!students.length){
+    $('roster').innerHTML='<div class="empty"><b>No learners yet</b>'
+      +'Add your kids from the Crew Roster on the bridge, and they will show up here as soon as they open a module.</div>';
+    return;
+  }
+
+  $('roster').innerHTML=students.map(renderStudentCard).join('');
+}
+
+function renderStudentCard(s){
+  const name=s.user.display_name||s.user.email.split('@')[0];
+  const total=s.time[RANGE]||0;
+  const byTool={};
+  (s.by_tool||[]).forEach(t=>{ byTool[t.slug]=t; });
+
+  const split=(OVERVIEW.tools||[]).map(t=>{
+    const secs=(byTool[t.slug]&&byTool[t.slug][RANGE])||0;
+    if(!secs||!total) return '';
+    return '<i style="width:'+((secs/total)*100).toFixed(2)+'%;background:'+ACCENT[t.accent]+'" title="'
+      +esc(t.name)+' — '+fmtDur(secs)+'"></i>';
+  }).join('');
+
+  const mods=(OVERVIEW.tools||[]).map(t=>{
+    const secs=(byTool[t.slug]&&byTool[t.slug][RANGE])||0;
+    const visits=(byTool[t.slug]&&byTool[t.slug].visits)||0;
+    return '<div class="mod">'
+      +'<div class="glyph" style="color:'+ACCENT[t.accent]+'">'+esc(t.glyph)+'</div>'
+      +'<div class="nm">'+esc(t.name)+'</div>'
+      +'<div class="st">'+progressLine(t.slug,s.progress[t.slug],visits)+'</div>'
+      +'<div class="tm'+(secs?'':' zero')+'">'+fmtDur(secs)+'</div>'
+      +'</div>';
+  }).join('');
+
+  return '<article class="panel student">'
+    +'<div class="st-top">'
+      +'<div class="avatar">'+esc(name[0].toUpperCase())+'</div>'
+      +'<div class="st-id"><div class="st-name">'+esc(name)+'</div>'
+        +'<div class="st-mail">'+esc(s.user.email)+'</div></div>'
+      +'<div class="st-time"><div class="big">'+fmtDur(total)+'</div>'
+        +'<div class="sub">'+esc(RANGE==='total'?'all time':RANGE==='today'?'today':RANGE==='week'?'7 days':'30 days')+'</div></div>'
+    +'</div>'
+    +'<div class="split'+(total?'':' empty')+'">'+split+'</div>'
+    +'<div class="mods">'+mods+'</div>'
+    +'<div class="st-foot">'
+      +'<div class="seen">Last in a module <b>'+esc(relTime(s.last_active_at))+'</b></div>'
+      +'<button class="btn sm" data-student="'+esc(s.user.id)+'">Open detail →</button>'
+    +'</div>'
+  +'</article>';
+}
+
+// One line per module saying where this learner actually stands.
+// Each module's own tables are the source; nothing is re-derived here.
+function progressLine(slug,p,visits){
+  if(slug==='spelling-drill'){
+    if(!p||!p.attempted) return '<span class="quiet">No words attempted yet</span>';
+    return '<b>'+p.mastered+'</b> of '+p.bank+' words mastered'
+      +(p.shaky?' · <b>'+p.shaky+'</b> still shaky':'');
+  }
+  if(slug==='math-facts'){
+    if(!p||!p.runs) return '<span class="quiet">No runs yet</span>';
+    return 'Best <b>'+p.best+'</b> · '+p.runs+' run'+(p.runs===1?'':'s')
+      +(p.ops?' · '+opsLabel(p.ops):'');
+  }
+  if(slug==='essay-coach'){
+    if(!p||!p.assigned) return '<span class="quiet">Nothing assigned yet</span>';
+    const s='<b>'+p.graded+'</b> of '+p.assigned+' graded';
+    return p.avg_score!=null ? s+' · avg <b>'+p.avg_score+'</b>' : s;
+  }
+  if(slug==='spanish-tutor'){
+    if(!p||!p.sessions) return '<span class="quiet">No sessions yet</span>';
+    return '<b>'+p.sessions+'</b> session'+(p.sessions===1?'':'s')+' · '+p.minutes+' min spoken';
+  }
+  if(slug==='code-lab'){
+    return visits ? '<b>'+visits+'</b> visit'+(visits===1?'':'s')
+                  : '<span class="quiet">Not opened yet</span>';
+  }
+  return '';
+}
+function opsLabel(ops){
+  const on=[]; if(ops.mul!==false) on.push('×'); if(ops.div!==false) on.push('÷');
+  if(ops.add!==false) on.push('+'); if(ops.sub!==false) on.push('−');
+  return on.join(' ');
+}
+
+$('roster').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-student]'); if(!b) return;
+  openStudent(b.dataset.student);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Student detail
+══════════════════════════════════════════════════════════════ */
+async function openStudent(id){
+  const s=(OVERVIEW.students||[]).find(x=>String(x.user.id)===String(id));
+  const name=s?(s.user.display_name||s.user.email.split('@')[0]):'Learner';
+  $('dtName').textContent=name;
+  $('dtSub').textContent='Loading the last 30 days…';
+  $('dtTiles').innerHTML=''; $('dtChart').innerHTML=''; $('dtPanels').innerHTML=''; $('dtVisits').innerHTML='';
+  show('student');
+
+  const r=await api('GET','/parents/students/'+encodeURIComponent(id)+'?tz='+encodeURIComponent(TZ));
+  if(r.error){ $('dtSub').textContent=r.error; toast(r.error,true); return; }
+  renderStudent(s,r);
+}
+
+function renderStudent(s,d){
+  const name=d.student.display_name||d.student.email.split('@')[0];
+  $('dtLabel').textContent=d.student.email;
+  $('dtName').textContent=name;
+
+  // Day buckets are the family's local days — the Worker grouped
+  // them in this browser's timezone, so the keys line up.
+  const dayDates=[];
+  const cursor=new Date();
+  for(let i=29;i>=0;i--){
+    dayDates.push(new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()-i));
+  }
+  const days=dayDates.map(dayKey);
+  const byDay=new Map(days.map(k=>[k,{ total:0, tools:{} }]));
+  (d.daily||[]).forEach(row=>{
+    const k=normDay(row.day); const bucket=byDay.get(k); if(!bucket) return;
+    const secs=Number(row.seconds||0);
+    bucket.total+=secs;
+    bucket.tools[row.tool_slug]=(bucket.tools[row.tool_slug]||0)+secs;
+  });
+
+  const totals=days.map(k=>byDay.get(k).total);
+  const max=Math.max.apply(null,totals.concat([1]));
+  const activeDays=totals.filter(v=>v>0).length;
+  const monthTotal=totals.reduce((a,b)=>a+b,0);
+
+  const toolTotals={};
+  (d.daily||[]).forEach(r=>{ toolTotals[r.tool_slug]=(toolTotals[r.tool_slug]||0)+Number(r.seconds||0); });
+  let topSlug=null;
+  Object.keys(toolTotals).forEach(k=>{ if(!topSlug||toolTotals[k]>toolTotals[topSlug]) topSlug=k; });
+
+  $('dtSub').textContent=activeDays
+    ? 'Worked on '+activeDays+' of the last 30 days.'
+    : 'No module time recorded in the last 30 days.';
+
+  $('dtTiles').innerHTML=[
+    tile('Last 30 days', fmtDur(monthTotal), activeDays+' active day'+(activeDays===1?'':'s')),
+    tile('Daily average', fmtDur(activeDays?monthTotal/activeDays:0), 'on the days they worked'),
+    tile('Busiest module', topSlug?toolMeta(topSlug).name:'—', topSlug?fmtDur(toolTotals[topSlug]):'nothing yet'),
+    tile('Last seen', relTime(s?s.last_active_at:(d.visits[0]&&d.visits[0].last_beat_at)),
+         d.visits.length?d.visits.length+' recent visits':'no visits yet'),
+  ].join('');
+
+  // 30-day stacked chart
+  const cols=days.map(k=>{
+    const b=byDay.get(k);
+    const h=max?Math.max(b.total?3:0,(b.total/max)*100):0;
+    const segs=Object.keys(b.tools).map(slug=>
+      '<i style="height:'+((b.tools[slug]/b.total)*100).toFixed(2)+'%;background:'+accentOf(slug)+'"></i>').join('');
+    const isToday=k===dayKey(new Date());
+    return '<div class="col'+(isToday?' today':'')+'" title="'+esc(k)+' — '+fmtDur(b.total)+'">'
+      +'<div style="height:'+h.toFixed(2)+'%;display:flex;flex-direction:column;justify-content:flex-end">'+segs+'</div>'
+      +'</div>';
+  }).join('');
+
+  const legend=(OVERVIEW.tools||[]).filter(t=>toolTotals[t.slug]).map(t=>
+    '<span><i style="background:'+ACCENT[t.accent]+'"></i>'+esc(t.name)+' · '+fmtDur(toolTotals[t.slug])+'</span>').join('');
+
+  $('dtChart').innerHTML='<div class="label">Time per day · last 30 days</div>'
+    +'<div class="bars">'+cols+'</div>'
+    +'<div class="axis"><span>'+esc(dayDates[0].toLocaleDateString(undefined,{month:'short',day:'numeric'}))+'</span>'
+    +'<span>Peak '+fmtDur(max)+'</span><span>Today</span></div>'
+    +(legend?'<div class="legend">'+legend+'</div>':'');
+
+  $('dtPanels').innerHTML=[
+    spellingPanel(d), mathPanel(d), essayPanel(d), spanishPanel(d),
+  ].filter(Boolean).join('');
+
+  $('dtVisits').innerHTML=(d.visits||[]).length
+    ? '<div class="rows">'+d.visits.map(v=>{
+        const m=toolMeta(v.tool_slug);
+        return '<div class="row">'
+          +'<span style="color:'+ACCENT[m.accent]+'">'+esc(m.glyph)+'</span>'
+          +'<span class="t">'+esc(m.name)+'</span>'
+          +'<span class="m">'+esc(new Date(v.started_at).toLocaleString(undefined,
+              { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }))+'</span>'
+          +'<span class="m" style="color:var(--text);min-width:3.4rem;text-align:right">'+fmtDur(v.seconds)+'</span>'
+          +'</div>';
+      }).join('')+'</div>'
+    : '<div class="note">No module visits recorded yet.</div>';
+}
+
+function tile(k,v,n){
+  return '<div class="panel tile"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
+    +(n?'<div class="n">'+esc(n)+'</div>':'')+'</div>';
+}
+function panelHead(slug,when){
+  const m=toolMeta(slug);
+  return '<h3><span class="g" style="color:'+ACCENT[m.accent]+'">'+esc(m.glyph)+'</span>'+esc(m.name)+'</h3>'
+    +'<div class="when">'+esc(when)+'</div>';
+}
+
+function spellingPanel(d){
+  const s=d.spelling||{};
+  const attempted=Number(s.attempted||0);
+  if(!attempted){
+    return '<div class="panel mpanel">'+panelHead('spelling-drill','not started')
+      +'<div class="note">No words attempted yet. The bank holds '+Number(s.bank||0)+' words.</div></div>';
+  }
+  const bank=Math.max(Number(s.bank||0),attempted);
+  const untried=Math.max(0,bank-attempted);
+  const pc=n=>((n/bank)*100).toFixed(2)+'%';
+  const weak=(s.weakest||[]).filter(w=>Number(w.score)<5);
+  return '<div class="panel mpanel">'+panelHead('spelling-drill',attempted+' of '+bank+' words attempted')
+    +'<div class="stat-row">'
+      +'<div class="stat"><div class="k">Mastered</div><div class="v" style="color:var(--green)">'+s.mastered+'</div></div>'
+      +'<div class="stat"><div class="k">Learning</div><div class="v" style="color:var(--amber)">'+s.learning+'</div></div>'
+      +'<div class="stat"><div class="k">Shaky</div><div class="v" style="color:var(--rose)">'+s.shaky+'</div></div>'
+      +'<div class="stat"><div class="k">Untried</div><div class="v" style="color:var(--faint)">'+untried+'</div></div>'
+    +'</div>'
+    +'<div class="bands">'
+      +'<i style="width:'+pc(s.mastered)+';background:var(--green)"></i>'
+      +'<i style="width:'+pc(s.learning)+';background:var(--amber)"></i>'
+      +'<i style="width:'+pc(s.shaky)+';background:var(--rose)"></i>'
+    +'</div>'
+    +(weak.length
+        ? '<div class="label">Needs work</div><div class="wordlist">'
+          +weak.map(w=>'<span class="word'+(Number(w.score)>0?' warm':'')+'" title="score '+esc(w.score)+'">'
+            +esc(w.word)+'</span>').join('')+'</div>'
+        : '<div class="note">Nothing in the danger zone right now.</div>')
+    +'</div>';
+}
+
+function mathPanel(d){
+  const st=d.math&&d.math.state;
+  if(!st||!Number(st.runs||0)){
+    return '<div class="panel mpanel">'+panelHead('math-facts','not started')
+      +'<div class="note">No runs recorded yet.</div></div>';
+  }
+  return '<div class="panel mpanel">'+panelHead('math-facts','last played '+relTime(d.math.updated_at))
+    +'<div class="stat-row">'
+      +'<div class="stat"><div class="k">Best score</div><div class="v" style="color:var(--violet)">'+Number(st.best||0)+'</div></div>'
+      +'<div class="stat"><div class="k">Runs</div><div class="v">'+Number(st.runs||0)+'</div></div>'
+      +'<div class="stat"><div class="k">Furthest</div><div class="v">'+Number(st.furthest||0)+'</div></div>'
+    +'</div>'
+    +'<div class="note">Practising: '+esc(st.ops?opsLabel(st.ops):'all four operations')
+    +'. A run ends when the monster catches up, so the score is how long they held it off.</div>'
+    +'</div>';
+}
+
+function essayPanel(d){
+  const rows=d.essays||[];
+  if(!rows.length){
+    return '<div class="panel mpanel">'+panelHead('essay-coach','nothing assigned')
+      +'<div class="note">Assign a prompt from the Essay Coach module and it will appear here.</div></div>';
+  }
+  const graded=rows.filter(r=>r.status==='graded');
+  const avg=graded.length
+    ? Math.round(graded.reduce((a,r)=>a+Number(r.score_total||0),0)/graded.length) : null;
+  return '<div class="panel mpanel">'+panelHead('essay-coach',
+      graded.length+' of '+rows.length+' graded'+(avg!=null?' · average '+avg:''))
+    +'<div class="rows">'+rows.slice(0,8).map(r=>{
+      const when=r.graded_at?relTime(r.graded_at):r.draft_updated_at?relTime(r.draft_updated_at):relTime(r.created_at);
+      const score=r.status==='graded'&&r.score_total!=null
+        ? '<span class="m" style="color:var(--green)">'+Number(r.score_total)+'</span>' : '';
+      return '<div class="row"><span class="t">'+esc(r.title)+'</span>'
+        +'<span class="m">'+esc(when)+'</span>'
+        +score
+        +'<span class="chip '+esc(r.status)+'">'+esc(({not_started:'Not started',draft:'Writing',
+            grading:'Grading',graded:'Graded'})[r.status]||r.status)+'</span></div>';
+    }).join('')+'</div>'
+    +(rows.length>8?'<div class="note">Showing the 8 most recent of '+rows.length+'.</div>':'')
+    +'</div>';
+}
+
+function spanishPanel(d){
+  const sp=d.spanish||{};
+  const sessions=sp.recent_sessions||[];
+  if(!sessions.length){
+    return '<div class="panel mpanel">'+panelHead('spanish-tutor','no sessions yet')
+      +'<div class="note">Nothing spoken yet. The full coaching report lives inside the Spanish Coach module.</div></div>';
+  }
+  const spoken=sessions.reduce((a,s)=>a+Number(s.duration_seconds||0),0);
+  const skills=(sp.skills||[]).slice(0,5);
+  const streak=sp.streak&&Number(sp.streak.streak_days||0);
+  return '<div class="panel mpanel">'+panelHead('spanish-tutor','last session '+relTime(sessions[0].started_at))
+    +'<div class="stat-row">'
+      +'<div class="stat"><div class="k">Recent sessions</div><div class="v">'+sessions.length+'</div></div>'
+      +'<div class="stat"><div class="k">Time spoken</div><div class="v">'+fmtDur(spoken)+'</div></div>'
+      +(sp.streak?'<div class="stat"><div class="k">Streak</div><div class="v" style="color:var(--amber)">'
+        +streak+' day'+(streak===1?'':'s')+'</div></div>'
+        +'<div class="stat"><div class="k">This week</div><div class="v">'
+        +Number(sp.streak.minutes_week||0)+' min</div></div>':'')
+    +'</div>'
+    +(skills.length
+      ? '<div class="label">Working on</div><div class="rows">'+skills.map(k=>
+          '<div class="row"><span class="t">'+esc(k.display_name||k.skill_key)+'</span>'
+          +'<span style="width:76px"><span class="bar-mini"><i style="width:'
+            +Math.round(Math.min(1,Math.max(0,Number(k.estimate||0)))*100)+'%"></i></span></span>'
+          +'<span class="m">'+Math.round(Number(k.estimate||0)*100)+'%</span></div>').join('')+'</div>'
+      : '')
+    +'<div class="note">The full report — corrections, vocabulary, and the lesson plan — is in the Spanish Coach module.</div>'
+    +'</div>';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Time on task — the Flight Deck counts itself too
+══════════════════════════════════════════════════════════════ */
+(function timeOnTask(){
+  const EVERY=45000;
+  let timer=null, last=0;
+  function beat(force){
+    const token=localStorage.getItem(TOKEN_KEY);
+    if(!token) return;
+    const now=Date.now();
+    if(!force && now-last<EVERY-2000) return;
+    last=now;
+    fetch(API_URL+'/activity/beat',{ method:'POST', keepalive:true,
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+      body:JSON.stringify({ tool:SLUG }) }).catch(()=>{});
+  }
+  function run(){
+    clearInterval(timer);
+    if(document.visibilityState==='visible'){ beat(); timer=setInterval(beat,EVERY); }
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden') beat(true);
+    run();
+  });
+  addEventListener('pagehide',()=>beat(true));
+  run();
+})();
+
+boot();
+</script>
+</body>
+</html>
