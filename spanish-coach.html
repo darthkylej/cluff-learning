@@ -115,13 +115,6 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 .bigStart:disabled{opacity:.45;cursor:not-allowed}
 
 /* ── live session ── */
-.phasebar{display:flex;gap:4px;margin-bottom:1.2rem}
-.phasebar .ph{flex:1;text-align:center}
-.phasebar .ph i{display:block;height:4px;border-radius:1px;background:rgba(255,255,255,.08);margin-bottom:.4rem;transition:background .3s var(--ease)}
-.phasebar .ph.done i{background:rgba(245,165,36,.45)}
-.phasebar .ph.now i{background:var(--amber);box-shadow:0 0 10px rgba(245,165,36,.8)}
-.phasebar .ph span{font-family:var(--font-mono);font-size:.52rem;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
-.phasebar .ph.now span{color:var(--amber)}
 
 .stage{padding:1.6rem 1.5rem;text-align:center;margin-bottom:1.2rem;min-height:210px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1rem}
 .state{font-family:var(--font-mono);font-size:.64rem;letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
@@ -259,8 +252,6 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 
     <!-- ══ LIVE ══ -->
     <section id="screen-live" class="screen">
-      <div class="phasebar" id="phaseBar"></div>
-
       <div class="panel stage">
         <div class="state" id="stateLabel">Connecting…</div>
         <div class="coachline" id="coachLine">…</div>
@@ -593,7 +584,7 @@ async function postAudioTurn(rec,control){
    Session state
 ══════════════════════════════════════════════════════════════ */
 const S={
-  id:null, startedAt:0, turn:0, phases:[], phaseKey:null,
+  id:null, startedAt:0, turn:0,
   busy:false, ended:false, transcript:[], showTranscript:false
 };
 
@@ -601,13 +592,6 @@ function setState(kind,text){
   const el=$('stateLabel');
   el.className='state '+kind;
   el.textContent=text;
-}
-
-function renderPhases(){
-  const cur=S.phases.findIndex(p=>p.key===S.phaseKey);
-  $('phaseBar').innerHTML=S.phases.map((p,i)=>
-    `<div class="ph ${i<cur?'done':''} ${i===cur?'now':''}"><i></i><span>${esc(p.name)}</span></div>`
-  ).join('');
 }
 
 function pushTranscript(who,text){
@@ -671,7 +655,6 @@ async function sendTurn({transcript,confidence,seconds,control,audio}){
   }
 
   S.turn++;
-  if(res.phase&&res.phase!==S.phaseKey){ S.phaseKey=res.phase; renderPhases(); }
 
   // In record mode we only learn what the child said once the server replies.
   const said = transcript || res.heard;
@@ -803,15 +786,13 @@ async function startSession(){
 
   Object.assign(S,{
     id:res.session_id,
-    startedAt:Date.now(), turn:0, phases:res.phases||[],
-    phaseKey:(res.phases&&res.phases[0]&&res.phases[0].key)||null,
+    startedAt:Date.now(), turn:0,
     busy:false, ended:false, transcript:[]
   });
   $('btnDirect').hidden = res.show_direct_button===false;
   $('transcript').innerHTML='';
   $('coachLine').textContent='…';
   $('youLine').textContent='';
-  renderPhases();
   showScreen('live');
 
   // The coach opens: no learner turn yet.

@@ -1343,22 +1343,13 @@ async function handleGetEssayResults(request, env, assignmentId, studentId) {
 const SPANISH_TURN_MODEL     = 'claude-sonnet-5';  // latency-sensitive
 const SPANISH_CONSOLIDATE_MODEL = 'claude-opus-5'; // quality-sensitive, once per session
 
-// Phase windows are fractions of the session, so they scale with
-// a 15 / 20 / 30-minute setting without redefining the arc.
-const SPANISH_PHASES = [
-  { key: 'saludo',   name: 'Saludo',   until: 0.10,
-    brief: 'Greeting ritual. Say hello warmly, ask how they are, ask one easy personal question.' },
-  { key: 'recuerdo', name: 'Recuerdo', until: 0.20,
-    brief: 'Call back to last time using the plan’s hooks. Reuse a past win; elicit one open target naturally.' },
-  { key: 'tema',     name: 'Tema',     until: 0.53,
-    brief: 'Today’s topic. Work the target words and structures into genuine conversation — never a drill.' },
-  { key: 'escena',   name: 'Escena',   until: 0.77,
-    brief: 'Role-play the scenario. Play your character; let the learner act and decide.' },
-  { key: 'juego',    name: 'Juego',    until: 0.90,
-    brief: 'Play the game from the plan using today’s words. Keep it light and quick.' },
-  { key: 'cierre',   name: 'Cierre',   until: 1.01,
-    brief: 'Closing. Recap three good words, praise one specific win, preview tomorrow, say goodbye warmly.' },
-];
+/* ── There is no session arc, and no session length ─────────────
+   A six-phase arc on a clock assumed a session was a unit of time
+   with a beginning and an end to reach. It isn't. A session is
+   however long a child feels like talking, and the conversation
+   picks up where it left off whenever they come back — which is
+   what the lesson plan and callback hooks were already for.
+──────────────────────────────────────────────────────────────── */
 
 const SPANISH_INTERVENTIONS = [
   'ignore', 'recast', 'expansion', 'extension',
@@ -1383,6 +1374,7 @@ function defaultSpanishProfile() {
   return {
     comprehension_level: 'novice_low', production_level: 'novice_low',
     correction_intensity: 'balanced', english_support: 'as_needed',
+    spanish_age: 2.0, spanish_age_baseline: null, spanish_age_set_at: null,
     speech_rate: 0.92, session_minutes: 15, daily_session_cap: 4,
     weekly_minutes_goal: 105, transcript_retention: 'days_30',
     show_direct_button: true, interests: [], profile_summary: '',
@@ -1398,54 +1390,90 @@ async function getSpanishProfile(env, userId) {
   return { user_id: userId, ...defaultSpanishProfile() };
 }
 
-/* ── The session clock counts speech, not wall time ─────────────
-   A wall clock punishes the pause before a sentence, which is the
-   exact moment a child is assembling one. Sessions were running out
-   with barely a word said in them. The clock now advances only while
-   the learner is actually recording, so thinking is free.
+/* ── Spanish age: one dial for how this child sounds ────────────
+   Not their real age. A 1 means they speak Spanish the way a
+   one-year-old does — a few words, no sentences, answers that may
+   not follow the question. A 3 means a three-year-old.
 
-   There is no cutoff. The clock chooses the phase and tells the coach
-   when a session has been worth having; the conversation ends when
-   the child ends it, or when it reaches its own natural close.
+   The coach speaks AT this level and expects replies AT it. That
+   second half is the part that matters: a child asked for a story
+   before they can build a sentence does not rise to the occasion,
+   they learn that Spanish is a thing they are bad at.
+
+   The parent sets the starting number. It drifts from there on the
+   evidence of what the child actually says, a tenth or two at a
+   time, up or down. Setting it again resets the drift to the new
+   number.
 ──────────────────────────────────────────────────────────────── */
+const SPANISH_AGE_MIN = 1;
+const SPANISH_AGE_MAX = 12;
 
-// What a session should contain before it counts as one.
-const SPANISH_MIN_SPEAKING_SECONDS = 60;
+// Per session. Seven sessions to move a full year at the maximum rate, so
+// growth is something a parent notices over a couple of weeks, not something
+// that whipsaws on one good day or one bad microphone.
+const SPANISH_AGE_MAX_DRIFT = 0.15;
 
-// A learner speaks perhaps a fifth of a conversation — the rest is the coach
-// talking, and the child listening, which is not idleness either. This turns
-// the parent-facing session_minutes setting into a speech budget, so that knob
-// keeps meaning something without anyone having to think in two units.
-const SPANISH_SPEAKING_RATIO = 0.2;
-
-function spanishSpeakingTarget(profile) {
-  const minutes = spanishNum(profile?.session_minutes, 5, 120, 15);
-  return Math.max(SPANISH_MIN_SPEAKING_SECONDS, minutes * 60 * SPANISH_SPEAKING_RATIO);
+function spanishAge(profile) {
+  return spanishNum(profile?.spanish_age, SPANISH_AGE_MIN, SPANISH_AGE_MAX, 2);
 }
 
-// Which phase are we in, given how much the learner has actually spoken?
-function spanishPhase(spokenSeconds, targetSeconds) {
-  const frac = targetSeconds > 0 ? spokenSeconds / targetSeconds : 1;
-  return SPANISH_PHASES.find(p => frac < p.until) || SPANISH_PHASES[SPANISH_PHASES.length - 1];
+// What that number means, in instructions the coach can actually follow.
+// Bands overlap the way real children do; the text is deliberately concrete,
+// because "speak simply" means nothing and "two to four words" means something.
+function spanishAgeGuide(age) {
+  const band =
+    age < 2  ? {
+      you:  'Single words and two-word phrases. Name things. Repeat the same handful of words often — repetition is the lesson at this level.',
+      them: 'Expect single words, sounds, silence, or an answer that has nothing to do with your question. All of that is success. Accept it, name what they said in Spanish, and move on warmly.',
+      ask:  'Ask only questions answerable by one word, a point, or a yes/no: ¿Qué es esto? ¿Te gusta? ¿Sí o no?',
+    } :
+    age < 3  ? {
+      you:  'Two- to four-word phrases. Present tense only. One idea per turn.',
+      them: 'Expect one or two words at a time, often just a noun. Never ask for more than that. Echo their word back inside a short correct phrase.',
+      ask:  'Ask this-or-that questions and simple ¿Qué? and ¿Dónde? — never why, never tell-me-about.',
+    } :
+    age < 4.5 ? {
+      you:  'Short simple sentences, four to seven words. Present tense, with a little querer and gustar.',
+      them: 'Expect two- or three-word answers and occasional short sentences. A one-word answer is still fine and always accepted.',
+      ask:  'Ask simple questions about right now and about what they like. Follow-ups should be just as small as the first question.',
+    } :
+    age < 6  ? {
+      you:  'Full simple sentences. Present, plus past and future in fixed familiar phrases.',
+      them: 'Expect short sentences, sometimes joined with y or porque. They can manage a two-sentence answer when interested, but never require it.',
+      ask:  'Ask what they did and what they will do. A gentle ¿Por qué? is fine now, and a shrug in reply is still a fine answer.',
+    } :
+    age < 8  ? {
+      you:  'Natural connected sentences at a relaxed pace. Past and future freely.',
+      them: 'Expect two or three sentences, reasons, opinions, a short retelling of something that happened.',
+      ask:  'Ask for opinions and reasons. Invite a short story sometimes, and let it go if they would rather not.',
+    } :
+    age < 10 ? {
+      you:  'Normal conversational Spanish, unsimplified but clearly spoken. Subjunctive where it falls naturally.',
+      them: 'Expect a paragraph of speech, an argued opinion, a story with an order to it.',
+      ask:  'Ask what they think and why, and push gently on the reasons.',
+    } : {
+      you:  'Speak as you would to a peer. Idiom, humour, and asides are all fair.',
+      them: 'Expect extended, structured speech and an ability to disagree with you.',
+      ask:  'Ask real questions with real disagreement in them.',
+    };
+
+  return [
+    `SPANISH AGE: ${age.toFixed(1)} — this learner speaks Spanish roughly like a child of that age.`,
+    `HOW YOU SPEAK: ${band.you}`,
+    `WHAT YOU EXPECT BACK: ${band.them}`,
+    `WHAT YOU ASK: ${band.ask}`,
+    'Never ask for more language than the level above describes. A question they cannot answer is not a stretch, it is a wall.',
+    'Never mention the level, the number, or their age. Never compare them to anyone.',
+  ].join('\n');
 }
 
-// The coach cannot keep time; we tell it the time every turn. None of this may
-// reach the child — a session that narrates its own budget teaches a child to
-// watch the budget instead of the conversation.
-function spanishClockLine(spokenSeconds, targetSeconds) {
-  const phase  = spanishPhase(spokenSeconds, targetSeconds);
-  const spoken = Math.round(spokenSeconds);
-  const short  = SPANISH_MIN_SPEAKING_SECONDS - spoken;
-
-  const lines = [
-    `[CLOCK] The learner has spoken about ${spoken} seconds so far. Phase: ${phase.name} — ${phase.brief}`,
-    '[CLOCK] This budget counts only the learner\'s own speech; their silences cost nothing, so never rush them and never fill a pause for them.',
-    '[CLOCK] Say nothing about time, seconds, minutes, length, phases, or progress — not as praise, not as encouragement, not at the close. The learner must never discover that speaking more is what carries the session forward.',
-  ];
-  lines.push(short > 0
-    ? `[CLOCK] This session is not yet worth keeping — roughly ${short} more seconds of their speech would do it. Do not begin closing. Ask what invites a long answer: a story, a reason, a description, an opinion, and then follow the thread they offer.`
-    : '[CLOCK] They have spoken enough for this session to count. Follow the conversation while it holds their interest, and close warmly when it reaches its own end.');
-  return lines.join('\n');
+// The model proposes an observed level; this decides what to store. Same rule
+// as the skill EMA: bounded movement, and evidence required before any move.
+function spanishNextAge(current, observed, learnerTurns) {
+  if (!Number.isFinite(observed) || learnerTurns < 4) return current;
+  const target = Math.max(SPANISH_AGE_MIN, Math.min(SPANISH_AGE_MAX, observed));
+  const step   = Math.max(-SPANISH_AGE_MAX_DRIFT, Math.min(SPANISH_AGE_MAX_DRIFT, target - current));
+  return Math.round(Math.max(SPANISH_AGE_MIN, Math.min(SPANISH_AGE_MAX, current + step)) * 10) / 10;
 }
 
 // Estimated seconds of speech for a Spanish utterance (~15 chars/sec).
@@ -1535,6 +1563,16 @@ const SPANISH_CONSOLIDATE_TOOL = {
         type: 'string',
         description: 'Updated running description of this learner: interests, level, habits worth remembering.',
       },
+      observed_spanish_age: {
+        type: 'number',
+        description:
+          'How old this learner SOUNDED in Spanish this session, on a scale where 1 speaks like a one-year-old ' +
+          '(a few isolated words, no sentences, answers that may not match the question), 3 like a three-year-old ' +
+          '(short phrases, simple present tense), 6 like a six-year-old (connected sentences, reasons), and 10 like ' +
+          'a ten-year-old (extended structured speech). Judge only what they actually produced in this transcript, ' +
+          'not what they seemed to understand and not what you hope for. Ignore turns that look like speech ' +
+          'recognition errors. If the session was too thin to judge, omit this field entirely.',
+      },
       next_lesson_plan: {
         type: 'object',
         required: ['callback_hooks', 'target_words'],
@@ -1600,18 +1638,20 @@ ENGLISH
 - English support setting is "${p.english_support}". It governs explanations only. Never conduct
   consecutive full turns in English.
 
-CLOCK
-- Each turn carries a [CLOCK] line with the phase. Obey it: finish your thought, then move on.
-- You may stretch a phase by one tick if the learner is deeply engaged, but NEVER skip the Cierre.
-- The clock measures only how long the learner has spoken. Their thinking time is free, so give
-  them room: never hurry them, never fill their silence, never treat a pause as a turn ending.
-- Nothing about the clock is visible to them and nothing about it may be spoken. Do not mention
-  time, length, progress, phases, or how much they have talked — not even as praise.
-- Nothing cuts a session off. When the [CLOCK] line says the session is not yet worth keeping,
-  stay in the conversation and draw them out with questions that want more than one word.
+LENGTH
+- A session has no length, no schedule, and no ending you are working toward. It lasts exactly as
+  long as the child wants to talk, and they end it themselves.
+- Never hurry them and never fill their silence. A long pause is a child building a sentence.
+- Say nothing about time, length, or how much they have talked — not as praise, not as
+  encouragement, not at the close. There is nothing to report and nothing to earn.
+- If they stop, they stop. If they come back tomorrow, pick the conversation up where it was.
+- Do not perform a closing ritual on a schedule. If they say goodbye, say goodbye warmly.
+
+LEVEL — the most important constraint here
+${spanishAgeGuide(spanishAge(p))}
 
 LEARNER
-Comprehension ${p.comprehension_level} | Production ${p.production_level} | Correction ${p.correction_intensity}
+Correction intensity ${p.correction_intensity}
 ${p.profile_summary ? `About them: ${p.profile_summary}` : ''}
 
 SESSION PLAN
@@ -1634,22 +1674,22 @@ invites emotional dependency. Keep role-play clearly pretend. Never ask for addr
 names, passwords, or other identifying details.`;
 }
 
-function buildSpanishTurnContent(ctx, transcript, confidence, clockLine) {
+function buildSpanishTurnContent(ctx, transcript, confidence, note) {
   const history = (ctx.history || []).map(t =>
     `${t.speaker === 'coach' ? 'COACH' : 'LEARNER'}: ${t.transcript}`).join('\n');
 
+  const head = `${note}\n\n${history ? `CONVERSATION SO FAR\n${history}\n\n` : ''}`;
+
   if (!transcript) {
-    return `${clockLine}\n\n${history ? `CONVERSATION SO FAR\n${history}\n\n` : ''}` +
-      `The session is starting and the learner has not spoken yet. Greet them warmly in Spanish ` +
-      `and ask one easy opening question. Do not report an intervention.`;
+    return `${head}The learner has not spoken yet. Greet them warmly in Spanish and ask one easy ` +
+      `opening question, pitched at their level. Do not report an intervention.`;
   }
 
   const conf = confidence == null ? 'unknown'
     : confidence < 0.6 ? `${confidence.toFixed(2)} (LOW — likely a recognition problem, not a learner error)`
     : confidence.toFixed(2);
 
-  return `${clockLine}\n\n${history ? `CONVERSATION SO FAR\n${history}\n\n` : ''}` +
-    `LEARNER JUST SAID (speech recognition, confidence ${conf}):\n"${transcript}"\n\n` +
+  return `${head}LEARNER JUST SAID (speech recognition, confidence ${conf}):\n"${transcript}"\n\n` +
     `Reply as the coach.`;
 }
 
@@ -1932,7 +1972,6 @@ async function handleCreateSpanishSession(request, env) {
                          description: ctx.scenario.description },
       topic:           ctx.topic ? { key: ctx.topic.key, title: ctx.topic.title } : null,
       plan:            ctx.plan,
-      phases:          SPANISH_PHASES.map(p => ({ key: p.key, name: p.name, until: p.until })),
       show_direct_button: profile.show_direct_button,
       speech_rate:     Number(profile.speech_rate),
     }, 201);
@@ -1948,12 +1987,9 @@ async function handleSpanishTurn(request, env, sessionId) {
     const sess = sr.rows?.[0];
     if (!sess) return err(request, 'Active session not found.', 404);
 
-    const profile      = await getSpanishProfile(env, session.user_id);
-    const targetSecs   = spanishSpeakingTarget(profile);
-    // Speech already banked in this session. No turn is refused on time — a
-    // session ends when the child ends it, and the month cap in
-    // handleCreateSpanishSession is what keeps the spend bounded.
-    const spokenBefore = Number(sess.input_audio_seconds || 0);
+    // Nothing here consults a clock. No turn is refused on time; the month cap
+    // in handleCreateSpanishSession is what keeps the spend bounded.
+    const profile = await getSpanishProfile(env, session.user_id);
 
     // Two input shapes. Browsers with the Web Speech API send JSON with a
     // transcript they produced; every other browser uploads raw audio and we
@@ -2009,12 +2045,10 @@ async function handleSpanishTurn(request, env, sessionId) {
       control        = cleanKey(body.control);    // slower | repeat | meaning | direct
       learnerSeconds = spanishNum(body.audio_seconds, 0, 300, 0);
     }
-    // Only speech that produced words counts. A child who holds the button for
-    // thirty seconds and says nothing has recorded silence, and silence is the
-    // thing this clock was rebuilt to stop charging them for.
+    // Recording time, banked for the Flight Deck. Only holds that produced
+    // words count: holding the button in silence is not speaking Spanish, and
+    // it is the one number a parent would misread if we inflated it.
     const learnerSecs = transcript ? (learnerSeconds || spanishSpeechSeconds(transcript)) : 0;
-    const spokenSecs  = spokenBefore + learnerSecs;
-    const phase       = spanishPhase(spokenSecs, targetSecs);
 
     // Recent history keeps the prompt bounded on long sessions.
     const histR = await query(env,
@@ -2025,16 +2059,20 @@ async function handleSpanishTurn(request, env, sessionId) {
     if (transcript) {
       await query(env,
         `INSERT INTO spanish_turns
-           (session_id, turn_index, speaker, transcript, transcript_confidence, audio_seconds, phase)
-         VALUES ($1,$2,'learner',$3,$4,$5,$6)
+           (session_id, turn_index, speaker, transcript, transcript_confidence, audio_seconds)
+         VALUES ($1,$2,'learner',$3,$4,$5)
          ON CONFLICT (session_id, turn_index, speaker) DO NOTHING`,
-        [sessionId, turnIndex, transcript, confidence, learnerSecs, phase.key]);
+        [sessionId, turnIndex, transcript, confidence, learnerSecs]);
     }
 
     const ctx = await loadSpanishContext(env, session.user_id, sess.scenario_key);
     ctx.history = history;
 
-    let clockLine = spanishClockLine(spokenSecs, targetSecs);
+    // Continuity, not a clock. Whether this is a fresh start or the middle of
+    // something is the only pacing information the coach needs now.
+    let clockLine = history.length
+      ? '[SESSION] The conversation is already under way. Continue it.'
+      : '[SESSION] This is the start of a session. If you have talked with this child before, pick up naturally from the callback hooks rather than starting over.';
     if (control) {
       const extra = {
         slower:  'The learner pressed "slower". Speak more simply and slowly for the next few turns.',
@@ -2076,10 +2114,10 @@ async function handleSpanishTurn(request, env, sessionId) {
     }
 
     await query(env,
-      `INSERT INTO spanish_turns (session_id, turn_index, speaker, transcript, audio_seconds, phase)
-       VALUES ($1,$2,'coach',$3,$4,$5)
+      `INSERT INTO spanish_turns (session_id, turn_index, speaker, transcript, audio_seconds)
+       VALUES ($1,$2,'coach',$3,$4)
        ON CONFLICT (session_id, turn_index, speaker) DO NOTHING`,
-      [sessionId, turnIndex, replyText, spanishSpeechSeconds(replyText), phase.key]);
+      [sessionId, turnIndex, replyText, spanishSpeechSeconds(replyText)]);
 
     // Pedagogical event — recorded server-side, never client-trusted.
     const iv = result.intervention;
@@ -2140,10 +2178,8 @@ async function handleSpanishTurn(request, env, sessionId) {
       audio_b64:  audio,             // null => browser shows text only
       heard:      transcript || null, // what we transcribed, for the UI to echo
       turn_index: turnIndex,
-      phase:      phase.key,
-      phase_name: phase.name,
-      // No clock goes to the browser. The page cannot display what it is
-      // never told, which is the only reliable way to keep it invisible.
+      // No clock and no phase go to the browser. The page cannot display what
+      // it is never told, which is the only reliable way to keep it invisible.
       corrected:  iv && iv.intervention_type !== 'ignore' ? iv.target_form || null : null,
     });
   });
@@ -2198,7 +2234,7 @@ async function handleEndSpanishSession(request, env, sessionId) {
     const duration = Math.max(0, Math.round((Date.now() - new Date(sess.started_at).getTime()) / 1000));
 
     const [turnsR, ivR, profileRow] = await Promise.all([
-      query(env, `SELECT speaker, transcript, phase FROM spanish_turns
+      query(env, `SELECT speaker, transcript, audio_seconds FROM spanish_turns
                    WHERE session_id = $1 ORDER BY id`, [sessionId]),
       query(env, `SELECT intervention_type, learner_form, target_form, skill_key, importance
                     FROM spanish_interventions WHERE session_id = $1 ORDER BY id`, [sessionId]),
@@ -2217,8 +2253,17 @@ async function handleEndSpanishSession(request, env, sessionId) {
       return json(request, { ok: true, too_short: true });
     }
 
+    // What the child actually recorded, which is the number the Flight Deck
+    // reports. duration_seconds is wall clock and stays alongside it, but a
+    // session where a child sat and listened for ten minutes is not ten
+    // minutes of Spanish spoken, and reporting it as such would flatter
+    // everyone involved.
+    const spokenSeconds = Math.round(
+      learnerTurns.reduce((n, t) => n + Number(t.audio_seconds || 0), 0));
+
     const aggregates = {
       duration_seconds: duration,
+      spoken_seconds:   spokenSeconds,
       learner_turns:    learnerTurns.length,
       coach_turns:      turns.length - learnerTurns.length,
       learner_words:    learnerTurns.reduce((n, t) => n + t.transcript.split(/\s+/).length, 0),
@@ -2275,14 +2320,23 @@ This session used unit: ${sess.topic_key || '(none)'} and scenario: ${sess.scena
           SET status = 'completed', ended_at = NOW(), duration_seconds = $2, summary = $3
         WHERE id = $1`, [sessionId, duration, JSON.stringify(summary)]);
 
+    // The level drifts on the evidence of what they actually said. The model
+    // proposes an observed age; spanishNextAge decides what that is worth,
+    // caps the movement, and refuses to move at all on a thin session.
+    const nextAge = spanishNextAge(
+      spanishAge(profileRow),
+      Number(consolidated?.observed_spanish_age),
+      learnerTurns.length);
+
     await query(env,
       `UPDATE spanish_profiles
           SET total_seconds  = total_seconds + $2,
               total_sessions = total_sessions + 1,
               profile_summary = COALESCE($3, profile_summary),
+              spanish_age    = $4,
               updated_at = NOW()
         WHERE user_id = $1`,
-      [session.user_id, duration, cleanText(consolidated?.profile_summary, 2000)]);
+      [session.user_id, spokenSeconds, cleanText(consolidated?.profile_summary, 2000), nextAge]);
 
     if (consolidated?.next_lesson_plan) {
       await query(env,
@@ -2303,8 +2357,10 @@ This session used unit: ${sess.topic_key || '(none)'} and scenario: ${sess.scena
 
 // ── Profile / streak ───────────────────────────────────────────
 async function spanishStreak(env, userId) {
+  // Seconds spoken, not seconds elapsed — the same number the Flight Deck
+  // reports, so a streak and a report never disagree about the same day.
   const r = await query(env,
-    `SELECT started_at::date AS d, SUM(duration_seconds) AS secs
+    `SELECT started_at::date AS d, SUM(input_audio_seconds) AS secs
        FROM spanish_sessions
       WHERE user_id = $1 AND status = 'completed'
       GROUP BY 1 ORDER BY 1 DESC LIMIT 90`, [userId]);
@@ -2462,8 +2518,19 @@ async function handlePatchSpanishSettings(request, env, studentId) {
       push('correction_intensity', body.correction_intensity);
     if (['immersion', 'as_needed', 'bilingual'].includes(body.english_support))
       push('english_support', body.english_support);
-    if ([15, 20, 30].includes(Number(body.session_minutes)))
-      push('session_minutes', Number(body.session_minutes));
+
+    // Setting the age by hand is a reset, not a nudge: it becomes the new
+    // baseline and the automatic drift starts again from there. That is the
+    // whole contract — a parent who thinks the coach has drifted too high can
+    // put it back and have the correction stick.
+    if (body.spanish_age != null && Number.isFinite(Number(body.spanish_age))) {
+      const age = Math.round(
+        spanishNum(body.spanish_age, SPANISH_AGE_MIN, SPANISH_AGE_MAX, 2) * 10) / 10;
+      push('spanish_age', age);
+      push('spanish_age_baseline', age);
+      sets.push('spanish_age_set_at = NOW()');
+    }
+
     if (Number.isInteger(Number(body.daily_session_cap)))
       push('daily_session_cap', clampInt(body.daily_session_cap, 1, 10));
     if (Number.isInteger(Number(body.weekly_minutes_goal)))
@@ -2651,11 +2718,11 @@ async function handleParentsOverview(request, env) {
        WHERE user_id IN (${inIdsAlone})
        GROUP BY user_id`, idOnly),
     query(env, `
-      SELECT p.user_id, p.total_sessions, p.total_seconds,
-             p.comprehension_level, p.production_level, p.weekly_minutes_goal,
+      SELECT p.user_id, p.total_sessions, p.total_seconds, p.weekly_minutes_goal,
+             p.spanish_age, p.spanish_age_baseline, p.spanish_age_set_at,
              (SELECT MAX(started_at) FROM spanish_sessions s
                WHERE s.user_id = p.user_id AND s.status = 'completed') AS last_session_at,
-             (SELECT COALESCE(SUM(duration_seconds), 0)::int FROM spanish_sessions s
+             (SELECT COALESCE(SUM(input_audio_seconds), 0)::int FROM spanish_sessions s
                WHERE s.user_id = p.user_id AND s.status = 'completed'
                  AND s.started_at >= NOW() - INTERVAL '7 days')        AS week_seconds
         FROM spanish_profiles p
@@ -2736,12 +2803,15 @@ async function handleParentsOverview(request, env) {
         },
         'spanish-tutor': sn ? {
           sessions: Number(sn.total_sessions || 0),
+          // Minutes the learner had the button down and produced words — not
+          // minutes the module was open.
           minutes:  Math.round(Number(sn.total_seconds || 0) / 60),
           week_minutes: Math.round(Number(sn.week_seconds || 0) / 60),
           weekly_minutes_goal: Number(sn.weekly_minutes_goal || 0),
-          comprehension_level: sn.comprehension_level,
-          production_level:    sn.production_level,
-          last_session_at:     sn.last_session_at,
+          spanish_age:          Number(sn.spanish_age ?? 2),
+          spanish_age_baseline: sn.spanish_age_baseline == null ? null : Number(sn.spanish_age_baseline),
+          spanish_age_set_at:   sn.spanish_age_set_at,
+          last_session_at:      sn.last_session_at,
         } : null,
         'code-lab': null, // lives on another site; opens are all we can see
       },
@@ -2808,7 +2878,7 @@ async function handleParentsStudent(request, env, studentId) {
        ORDER BY a.created_at DESC
        LIMIT 20`, [studentId]),
     query(env, `
-      SELECT id, started_at, duration_seconds, scenario_key, topic_key, summary
+      SELECT id, started_at, duration_seconds, input_audio_seconds, scenario_key, topic_key, summary
         FROM spanish_sessions
        WHERE user_id = $1 AND status = 'completed'
        ORDER BY started_at DESC
@@ -2820,6 +2890,10 @@ async function handleParentsStudent(request, env, studentId) {
        LIMIT 10`, [studentId]),
     spanishStreak(env, studentId).catch(() => null),
   ]);
+
+  // Ensures the row exists, so a learner who has never opened the module still
+  // shows a level the parent can set rather than an empty control.
+  const spanishProfile = await getSpanishProfile(env, studentId).catch(() => null);
 
   return json(request, {
     student,
@@ -2837,6 +2911,14 @@ async function handleParentsStudent(request, env, studentId) {
       streak,
       recent_sessions: spanishR.rows || [],
       skills: skillsR.rows || [],
+      age: {
+        current:  spanishAge(spanishProfile),
+        baseline: spanishProfile?.spanish_age_baseline == null
+          ? null : Number(spanishProfile.spanish_age_baseline),
+        set_at:   spanishProfile?.spanish_age_set_at || null,
+        min: SPANISH_AGE_MIN,
+        max: SPANISH_AGE_MAX,
+      },
     },
   });
 }

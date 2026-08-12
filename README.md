@@ -303,43 +303,58 @@ The Worker logs the container, byte count, and upstream reply on the listening
 failures, and the user, turn index, and transcript length on the answering ones,
 so `wrangler tail` names the cause on the first failing turn.
 
-**The session clock counts speech, not wall time.** A countdown running against
-a child punishes the pause before a sentence, which is the exact moment they are
-assembling one — sessions were expiring with barely a word said in them. The
-clock now advances only by seconds the learner actually recorded, and only for
-holds that produced words: silence is free, thinking is free.
+**A session has no length.** No countdown, no target, no phases, no forced end,
+no 409. It lasts exactly as long as the child wants to talk and they end it
+themselves; the coach picks the conversation up where it left off next time,
+which is what the lesson plan and callback hooks were always for.
 
-Three consequences, all deliberate:
+This replaced two earlier designs in quick succession, and both failures are
+worth keeping written down:
 
-- **Nothing cuts a session off.** No countdown, no forced end, no 409. It ends
-  when the child ends it. The month cap and `daily_session_cap` still bound the
-  spend, and they are checked before a session starts, not during one.
-- **The clock is invisible.** No timer on screen, no length promised on the home
-  screen, no minutes in the child's recap, and the `/turn` response carries no
-  clock at all — the page cannot display what it is never told. The coach is
-  instructed never to mention time, length, or progress aloud.
-- **A minute of speech is the floor.** Under it, the injected `[CLOCK]` line
-  tells the coach the session is not yet worth keeping and to draw the child out
-  with questions that want more than one word. It never says this to the child,
-  and nothing blocks them from leaving early.
+1. A **wall clock** counted down while a child stood there working out how to
+   say something — punishing the exact moment the learning happens. Sessions
+   expired with barely a word spoken in them.
+2. A **speech clock** with a one-minute floor fixed the timing but broke the
+   pedagogy: to reach the floor the coach asked for stories, reasons, and
+   opinions from children who cannot yet build a sentence. A question a child
+   cannot answer is not a stretch, it is a wall.
 
-**Every session still follows a six-phase arc,** because a model left to
-free-converse asks *"¿Qué te gusta hacer?"* every day and runs dry quickly. The
-windows are fractions of a **speech** budget — `session_minutes × 0.2`, a
-learner's rough share of a conversation, floored at 60 seconds — so the parent's
-15/20/30 setting stretches the arc rather than redefining it:
+Nothing is timed now, and nothing is encouraged. The month cap and
+`daily_session_cap` still bound the spend, checked before a session starts
+rather than during one — which makes the month cap the real ceiling.
 
-| Phase | Window (of 180s spoken) | Purpose |
-| --- | --- | --- |
-| Saludo | 0–18s | Fixed greeting ritual — builds automaticity |
-| Recuerdo | 18–36s | Callbacks from the lesson plan |
-| Tema | 36–95s | Today's curriculum unit, in real conversation |
-| Escena | 95–139s | Role-play the scenario |
-| Juego | 139–162s | A game using today's words |
-| Cierre | 162s+ | Recap, praise, preview, goodbye — never skipped |
+**Time spoken is still measured, just not enforced.** Every learner turn that
+produced words banks its recording seconds in `input_audio_seconds`; holding the
+button in silence banks nothing. That figure — not wall-clock duration — is what
+the streak, the profile total, and the Flight Deck all report, so a session where
+a child sat and listened for ten minutes never reads as ten minutes of Spanish
+spoken.
 
-Past the end of the arc the coach simply stays in Cierre for as long as the
-child keeps talking.
+**Level is one dial: the child's Spanish age.** Not their real age — a `1` speaks
+Spanish the way a one-year-old does (a few isolated words, no sentences, answers
+that may not match the question); a `3` like a three-year-old; a `6` manages full
+sentences and reasons. The parent sets it in the Flight Deck.
+
+The number drives both halves of the conversation, and the second half is the one
+that matters:
+
+| | What the coach does |
+| --- | --- |
+| **How it speaks** | Matched to the band — two-word phrases at 2, full sentences at 5, unsimplified Spanish at 9 |
+| **What it expects back** | Explicitly capped. At 1, silence or an unrelated word *is* success and is accepted warmly |
+| **What it asks** | Yes/no and point-at-it questions low down; opinions and disagreement only high up |
+
+It is never spoken aloud — no mention of the level, the number, or the child's
+age, and no comparisons.
+
+**Growth is automatic; the parent's setting is a reset.** At the end of each
+session the consolidation call reports `observed_spanish_age` — how old the child
+*sounded*, judged only from what they actually produced. `spanishNextAge` decides
+what that is worth: no movement at all on a session under four learner turns, and
+at most ±0.15 either way, so a full year of growth takes about seven sessions and
+one bad microphone cannot undo a month. Setting the dial by hand writes a new
+baseline and the drift starts again from there, so a correction sticks. The
+Flight Deck shows both: the number you set, and where it has drifted to.
 
 **Memory.** After each session one Claude call writes the parent summary, the
 child's summary, and **the next session's lesson plan** — callback hooks drawn
@@ -361,7 +376,8 @@ proposes, the database decides.
 Nine tables (`spanish_profiles`, `_sessions`, `_turns`, `_interventions`,
 `_skills`, `_vocabulary`, `_scenarios`, `_topics`, `_lesson_plans`) come from
 `migrations/003_spanish_coach.sql`, which also seeds a 12-unit curriculum and
-five role-play scenarios.
+five role-play scenarios. `migrations/005_spanish_age.sql` adds the level dial.
+`session_minutes` survives on the table but nothing reads it.
 
 > **Before enabling this for the kids, complete `docs/VOICE_AUDITION.md`.** The
 > coach's voice is the pronunciation curriculum — if it speaks Spanish with an

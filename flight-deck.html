@@ -182,6 +182,19 @@ main{flex:1;width:100%;max-width:1180px;margin:0 auto;padding:clamp(1.75rem,5vw,
 .word{font-family:var(--font-mono);font-size:.72rem;padding:.22rem .5rem;border-radius:2px;
   border:1px solid rgba(251,113,133,.3);color:#ffc2cb;background:rgba(251,113,133,.07)}
 .word.warm{border-color:rgba(245,165,36,.3);color:#ffdca8;background:rgba(245,165,36,.07)}
+/* the one control on this page that writes something back */
+.setting{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;
+  padding:.75rem .85rem;margin:.2rem 0 .9rem;border-radius:var(--r);
+  background:rgba(245,165,36,.05);border:1px solid rgba(245,165,36,.2)}
+.setting select{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:.85rem;font-weight:600;
+  padding:.35rem 1.7rem .35rem .6rem;border-radius:2px;color:var(--amber);
+  border:1px solid rgba(245,165,36,.45);background:rgba(5,9,18,.9);
+  background-image:linear-gradient(45deg,transparent 50%,var(--amber) 50%),linear-gradient(135deg,var(--amber) 50%,transparent 50%);
+  background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.setting select:disabled{opacity:.5;cursor:wait}
+.setting .k{font-family:var(--font-mono);font-size:.55rem;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+.setting .drift{font-family:var(--font-mono);font-size:.68rem;color:var(--amber)}
+.setting .hint{flex-basis:100%;font-size:.76rem;color:var(--dim);margin:0}
 .rows{display:flex;flex-direction:column;gap:.1rem}
 .row{display:flex;align-items:center;gap:.7rem;font-size:.83rem;padding:.42rem 0;border-top:1px solid rgba(79,209,224,.07)}
 .row:first-child{border-top:0}
@@ -524,8 +537,9 @@ function progressLine(slug,p,visits){
     return p.avg_score!=null ? s+' · avg <b>'+p.avg_score+'</b>' : s;
   }
   if(slug==='spanish-tutor'){
-    if(!p||!p.sessions) return '<span class="quiet">No sessions yet</span>';
-    return '<b>'+p.sessions+'</b> session'+(p.sessions===1?'':'s')+' · '+p.minutes+' min spoken';
+    const age=p&&p.spanish_age!=null ? ' · age <b>'+Number(p.spanish_age).toFixed(1)+'</b>' : '';
+    if(!p||!p.sessions) return '<span class="quiet">No sessions yet</span>'+age;
+    return '<b>'+p.sessions+'</b> session'+(p.sessions===1?'':'s')+' · '+p.minutes+' min spoken'+age;
   }
   if(slug==='code-lab'){
     return visits ? '<b>'+visits+'</b> visit'+(visits===1?'':'s')
@@ -725,17 +739,50 @@ function essayPanel(d){
     +'</div>';
 }
 
+// The Spanish age control. A number the parent sets, which the coach then
+// drifts from on the evidence of what the child actually says. Setting it
+// again is a reset — it becomes the new baseline and the drift starts over.
+function spanishAgeControl(studentId,age){
+  const a    = age||{};
+  const cur  = Number(a.current ?? 2);
+  const base = a.baseline == null ? null : Number(a.baseline);
+  const lo   = Number(a.min ?? 1), hi = Number(a.max ?? 12);
+  const shown= Math.round(base == null ? cur : base);
+
+  let opts='';
+  for(let n=lo;n<=hi;n++) opts+='<option value="'+n+'"'+(n===shown?' selected':'')+'>'+n+'</option>';
+
+  // Only worth showing once it has actually moved off what was set.
+  const drifted = base != null && Math.abs(cur-base) >= 0.2;
+
+  return '<div class="setting">'
+    +'<span class="k">Spanish age</span>'
+    +'<select data-age-for="'+esc(studentId)+'" aria-label="Spanish age">'+opts+'</select>'
+    +(drifted ? '<span class="drift">now '+cur.toFixed(1)+' · you set '+base.toFixed(1)
+        +(a.set_at?' '+relTime(a.set_at):'')+'</span>' : '')
+    +'<p class="hint">How well they speak Spanish, not how old they are. '
+    +'<b>1</b> — a few words, no sentences. <b>3</b> — short phrases. '
+    +'<b>6</b> — full sentences and reasons. The coach talks at this level and expects '
+    +'answers at it, then moves on its own as they grow. Set it again any time to correct it.</p>'
+    +'</div>';
+}
+
 function spanishPanel(d){
   const sp=d.spanish||{};
   const sessions=sp.recent_sessions||[];
+  const control=spanishAgeControl(d.student.id,sp.age);
   if(!sessions.length){
     return '<div class="panel mpanel">'+panelHead('spanish-tutor','no sessions yet')
+      +control
       +'<div class="note">Nothing spoken yet. The full coaching report lives inside the Spanish Coach module.</div></div>';
   }
-  const spoken=sessions.reduce((a,s)=>a+Number(s.duration_seconds||0),0);
+  // Seconds they actually held the button and produced words — not how long
+  // the module sat open.
+  const spoken=sessions.reduce((a,s)=>a+Number(s.input_audio_seconds||0),0);
   const skills=(sp.skills||[]).slice(0,5);
   const streak=sp.streak&&Number(sp.streak.streak_days||0);
   return '<div class="panel mpanel">'+panelHead('spanish-tutor','last session '+relTime(sessions[0].started_at))
+    +control
     +'<div class="stat-row">'
       +'<div class="stat"><div class="k">Recent sessions</div><div class="v">'+sessions.length+'</div></div>'
       +'<div class="stat"><div class="k">Time spoken</div><div class="v">'+fmtDur(spoken)+'</div></div>'
@@ -754,6 +801,21 @@ function spanishPanel(d){
     +'<div class="note">The full report — corrections, vocabulary, and the lesson plan — is in the Spanish Coach module.</div>'
     +'</div>';
 }
+
+// Panels are rendered as HTML strings, so the one interactive control on the
+// page is reached by delegation rather than by a handler bound at render time.
+$('dtPanels').addEventListener('change',async e=>{
+  const sel=e.target.closest('select[data-age-for]');
+  if(!sel) return;
+  const id=sel.dataset.ageFor, age=Number(sel.value);
+  sel.disabled=true;
+  const r=await api('PATCH','/spanish/settings/'+encodeURIComponent(id),{ spanish_age:age });
+  sel.disabled=false;
+  if(r.error){ toast(r.error,true); return; }
+  toast('Spanish age set to '+age+'. The coach will start there.');
+  // Re-read so the drift readout reflects the reset rather than a stale value.
+  openStudent(id);
+});
 
 /* ══════════════════════════════════════════════════════════════
    Time on task — the Flight Deck counts itself too
