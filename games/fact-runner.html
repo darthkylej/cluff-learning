@@ -70,12 +70,15 @@
   .screen.active{ display:block; }
 
   /* ── Menu ───────────────────────────────────────────────────── */
-  .hero{ text-align:center; padding:20px 12px 6px; }
+  .hero{ text-align:center; padding:10px 12px 6px; }
+  /* The chase, running on a loop, in place of the two emoji that used
+     to stand in for it. */
+  #menuScene{ width:min(760px,100%); height:118px; display:block; margin:0 auto 5px;
+    border-bottom:1px solid rgba(79,209,224,.12); }
   .hero .title{ font-size:clamp(2.1rem,7vw,3.6rem); font-weight:800; letter-spacing:-.02em; line-height:1.05; }
   .hero .title .t1{ color:var(--violet); text-shadow:0 0 26px rgba(167,139,250,.45); }
   .hero .title .t2{ color:var(--cyan); text-shadow:0 0 26px rgba(79,209,224,.4); }
   .hero .sub{ margin-top:10px; color:var(--muted); font-size:.95rem; }
-  .hero .runners{ font-size:2rem; letter-spacing:.5rem; margin-bottom:6px; }
 
   .panelbox{ background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
     padding:18px; margin:18px 0; backdrop-filter:blur(8px); }
@@ -146,8 +149,13 @@
 
   /* ── Game ───────────────────────────────────────────────────── */
   #sceneWrap{ position:relative; border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
-    background:#050a16; }
+    background:#050a16; box-shadow:0 18px 55px -35px rgba(79,209,224,.45);
+    transition:border-color .2s, box-shadow .2s; }
   #scene{ display:block; width:100%; height:clamp(190px,30vh,290px); }
+  /* The frame itself reacts, so the warning does not have to be painted
+     over the top of the corridor the child is trying to read. */
+  #sceneWrap.panic{ border-color:rgba(251,113,133,.45); box-shadow:0 0 42px -17px rgba(251,113,133,.85); }
+  #sceneWrap.boost{ border-color:rgba(79,209,224,.45); box-shadow:0 0 42px -17px rgba(79,209,224,.75); }
 
   #pauseVeil{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     flex-direction:column; gap:12px; background:rgba(4,7,15,.86); backdrop-filter:blur(3px);
@@ -163,12 +171,14 @@
   #dangerTrack{ height:9px; border-radius:99px; background:rgba(251,113,133,.14);
     border:1px solid var(--line); overflow:hidden; margin-top:6px; }
   #dangerBar{ height:100%; width:100%; border-radius:99px;
-    background:linear-gradient(90deg,var(--magenta),var(--gold),var(--lime)); }
+    background:linear-gradient(90deg,var(--magenta),var(--gold),var(--lime)); transition:filter .15s; }
+  #dangerWrap.panic #dangerBar{ filter:brightness(1.35) saturate(1.3); }
 
   #problemCard{ background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
     padding:22px 18px; text-align:center; backdrop-filter:blur(8px);
-    transition:border-color .18s, box-shadow .18s; }
-  #problemCard.right{ border-color:rgba(52,211,153,.6); box-shadow:0 0 34px -10px rgba(52,211,153,.6); }
+    transition:border-color .18s, box-shadow .18s, transform .18s; }
+  #problemCard.right{ border-color:rgba(52,211,153,.6); box-shadow:0 0 34px -10px rgba(52,211,153,.6);
+    transform:translateY(-1px); }
   #problemCard.wrong{ border-color:rgba(251,113,133,.6); box-shadow:0 0 34px -10px rgba(251,113,133,.6); }
 
   #equation{ font-family:var(--font-mono); font-size:clamp(2rem,8vw,3.4rem); font-weight:700;
@@ -201,7 +211,8 @@
   #bestBanner.show{ opacity:1; transform:translate(-50%,0); }
 
   /* ── Game over ──────────────────────────────────────────────── */
-  #overCard{ text-align:center; padding:34px 20px; }
+  #overCard{ text-align:center; padding:26px 20px 34px; }
+  #overScene{ display:block; width:min(520px,100%); height:170px; margin:0 auto 2px; }
   #overTitle{ font-size:clamp(1.7rem,6vw,2.8rem); font-weight:800; letter-spacing:-.01em; }
   #overTitle.record{ color:var(--gold); text-shadow:0 0 30px rgba(245,165,36,.55); }
   #overSub{ color:var(--muted); margin-top:8px; }
@@ -219,6 +230,8 @@
     .hud{ gap:10px; }
     #equation{ gap:.25em; }
     #answer{ width:3em; }
+    #menuScene{ height:94px; }
+    #overScene{ height:140px; }
   }
 </style>
 </head>
@@ -252,7 +265,7 @@
   <!-- ══ MENU ══════════════════════════════════════════════════ -->
   <section id="screen-menu" class="screen active">
     <div class="hero">
-      <div class="runners">🏃 · · 👹</div>
+      <canvas id="menuScene" aria-hidden="true"></canvas>
       <div class="title"><span class="t1">Fact</span> <span class="t2">Runner</span></div>
       <p class="sub">Answer fast, stay ahead. Every right answer is a step forward —<br>every wrong one is a step back, and it is <em>gaining</em>.</p>
     </div>
@@ -306,8 +319,8 @@
       <h3>How to play</h3>
       <ul class="how">
         <li>A problem appears. Type the answer and press <b>Enter</b>.</li>
-        <li><b>Correct</b> — a bright bling, the numbers flash green, and you take a step forward.</li>
-        <li><b>Wrong</b> — a buzzer, the numbers flash red, and you slip a step back. The answer is shown, then <b>the same problem comes back</b> until you get it right.</li>
+        <li><b>Correct</b> — a bright bling, the numbers flash green, and your pack fires you a step forward. A run of them lights the whole suit.</li>
+        <li><b>Wrong</b> — a buzzer, the numbers flash red, and you stumble a step back. The answer is shown, then <b>the same problem comes back</b> until you get it right.</li>
         <li>The monster never stops, and it speeds up the longer you last. Distance is the only thing keeping it off you.</li>
         <li id="negLine">Negative answers are fine — type the minus sign, or tap <b>±</b>.</li>
         <li>Press <b>Esc</b> to pause.</li>
@@ -346,7 +359,7 @@
   <!-- ══ GAME OVER ═════════════════════════════════════════════ -->
   <section id="screen-over" class="screen">
     <div class="panelbox" id="overCard">
-      <div style="font-size:3rem">👹</div>
+      <canvas id="overScene" aria-hidden="true"></canvas>
       <div id="overTitle">Caught!</div>
       <p id="overSub"></p>
       <div class="stats">
@@ -396,6 +409,7 @@ async function api(method, path, body){
 const $ = id => document.getElementById(id);
 const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
 const randInt = (a,b) => a + Math.floor(Math.random() * (b - a + 1));
+const rand    = (a,b) => a + Math.random() * (b - a);
 
 /* ══════════════════════════════════════════════════════════════
    Saved state — best score, lifetime counters, mute
@@ -586,7 +600,12 @@ const G = {
   score:0, streak:0, bestStreak:0, steps:0, asked:0, right:0,
   problem:null, retry:false, locked:false,
   beatBest:false,
-  runPhase:0, monPhase:0, scroll:0, shake:0
+  runPhase:0, monPhase:0, scroll:0, shake:0,
+  // Short-lived reaction timers, all counted down in the frame loop.
+  // They are what turns a right or wrong answer into something the
+  // runner visibly does, rather than a number that changes.
+  boost:0, stumble:0, monsterLunge:0, catchAnim:0,
+  menuT:0                         // the menu banner's own clock
 };
 
 function resetGame(){
@@ -597,6 +616,8 @@ function resetGame(){
   G.score = 0; G.streak = 0; G.bestStreak = 0; G.steps = 0; G.asked = 0; G.right = 0;
   G.problem = null; G.retry = false; G.locked = false;
   G.beatBest = false; G.shake = 0;
+  G.boost = 0; G.stumble = 0; G.monsterLunge = 0; G.catchAnim = 0;
+  particles.length = 0;
 }
 
 // The monster accelerates with both wall-clock time and how well you
@@ -673,6 +694,8 @@ function submitAnswer(){
     G.steps++;
     G.runner = Math.min(G.runner + 1, G.monster + MAX_LEAD);
     G.retry = false;
+    G.boost = 0.38;
+    spawnBoostBurst();
     Sound.correct();
     $('problemCard').className = 'right';
     $('verdict').className = 'right';
@@ -687,6 +710,9 @@ function submitAnswer(){
     G.runner -= 1;
     G.retry = true;                          // same problem comes back
     G.shake = 0.35;
+    G.stumble = 0.55;
+    G.monsterLunge = 0.38;
+    spawnStumbleSparks();
     Sound.wrong();
     $('problemCard').className = 'wrong';
     $('verdict').className = 'wrong';
@@ -715,7 +741,7 @@ function updateHud(){
 }
 
 // Runs every frame, so it only touches the DOM when something changed.
-let lastDangerPct = -1, lastPanic = null;
+let lastDangerPct = -1, lastPanic = null, lastClosing = null, lastSurge = null;
 function updateDanger(){
   const lead = G.runner - G.monster;
   const pct  = Math.round(clamp(lead / START_LEAD, 0, 1) * 100);
@@ -727,7 +753,20 @@ function updateDanger(){
   if(panic !== lastPanic){
     $('dangerLabel').textContent  = panic ? 'RUN!' : 'Lead';
     $('dangerLabel').style.color  = panic ? 'var(--magenta)' : '';
+    $('dangerWrap').classList.toggle('panic', panic);
     lastPanic = panic;
+  }
+  // The frame warms a little earlier than the label shouts, so there is
+  // a beat of "it is getting close" before the beat of "run".
+  const closing = lead < 2.2;
+  if(closing !== lastClosing){
+    $('sceneWrap').classList.toggle('panic', closing);
+    lastClosing = closing;
+  }
+  const surge = G.boost > 0.12;
+  if(surge !== lastSurge){
+    $('sceneWrap').classList.toggle('boost', surge);
+    lastSurge = surge;
   }
 }
 
@@ -741,7 +780,7 @@ function startRun(){
   persist();
   show('game');
   sizeCanvas();          // the scene measures 0 wide while its screen is hidden
-  lastDangerPct = -1; lastPanic = null;
+  lastDangerPct = -1; lastPanic = null; lastClosing = null; lastSurge = null;
   updateHud();
   updateDanger();
   nextProblem();
@@ -750,6 +789,8 @@ function startRun(){
 function endRun(){
   if(G.over) return;
   G.over = true; G.running = false;
+  G.catchAnim = 1; G.shake = 0.85; G.monsterLunge = 1;
+  spawnCatchBurst();
   Sound.caught();
 
   const record = G.score > SAVE.best;
@@ -768,208 +809,695 @@ function endRun(){
     ? 'That is the furthest anyone has stayed ahead on this account. Best streak: ' + G.bestStreak + ' in a row.'
     : 'The monster got you at ' + G.score + '. Best streak this run: ' + G.bestStreak + '. Best score to beat: ' + SAVE.best + '.';
 
+  // Long enough to watch the thing actually catch you. Cutting to the
+  // card at 850ms clipped the lunge halfway through.
   setTimeout(() => {
     show('over');
+    drawOverScene(record);
     if(record){ Sound.fanfare(); burstConfetti(); }
-  }, 850);
+  }, 1050);
 }
 
 /* ══════════════════════════════════════════════════════════════
    Scene rendering
+
+   Three canvases share the runner and the monster: the corridor the
+   run happens in, a looping banner on the menu, and a still on the
+   game-over card. Drawing all three from the same code is what makes
+   the thing on the menu recognisably the thing that catches you.
 ══════════════════════════════════════════════════════════════ */
 const cv = $('scene');
 const cx = cv.getContext('2d');
+const menuCv = $('menuScene'), menuCx = menuCv.getContext('2d');
+const overCv = $('overScene'), overCx = overCv.getContext('2d');
 let W = 0, H = 0;
 
-function sizeCanvas(){
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const rect = cv.getBoundingClientRect();
-  W = Math.max(320, rect.width);
-  H = Math.max(160, rect.height);
-  cv.width  = Math.round(W * dpr);
-  cv.height = Math.round(H * dpr);
-  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+// Backing store in device pixels, drawing in CSS pixels. Returns the
+// CSS size it settled on, because a canvas sitting on a hidden screen
+// measures zero and silently gets the floor instead.
+function fitCanvas(canvas, ctx, minW, minH){
+  const dpr  = Math.min(2, window.devicePixelRatio || 1);
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(minW, rect.width), h = Math.max(minH, rect.height);
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [w, h];
 }
-window.addEventListener('resize', sizeCanvas);
+
+function sizeCanvas(){ [W, H] = fitCanvas(cv, cx, 320, 160); }
+window.addEventListener('resize', () => {
+  sizeCanvas();
+  // The menu banner re-measures itself as it draws. The game-over still
+  // is painted once and has to be told.
+  if($('screen-over').classList.contains('active')) drawOverScene(overRecord);
+});
+
+// ctx.roundRect is recent enough that an older browser would throw
+// mid-frame and take the whole scene down with it.
+function roundRectPath(c, x, y, w, h, r){
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y,     x + w, y + h, r);
+  c.arcTo(x + w, y + h, x,     y + h, r);
+  c.arcTo(x,     y + h, x,     y,     r);
+  c.arcTo(x,     y,     x + w, y,     r);
+  c.closePath();
+}
 
 function stepPx(){ return W / 10; }
-function runnerScreenX(){ return W * 0.66; }
+function runnerScreenX(){ return W * 0.68; }
+function groundLine(){ return H * 0.82; }
 
-function drawScene(dt){
-  const groundY = H * 0.82;
-  const sp = stepPx();
+/* ── Particles ─────────────────────────────────────────────────
+   One flat array, emptied at the start of every run. None of this
+   touches play; it exists so a right answer looks like thrust and a
+   wrong one looks like tripping.
+───────────────────────────────────────────────────────────────── */
+const particles = [];
+
+function particle(o){
+  particles.push(Object.assign({
+    x:0, y:0, vx:0, vy:0, life:0.5, maxLife:0.5,
+    r:2, color:'#4fd1e0', drag:0, gravity:0, shape:'dot'
+  }, o));
+}
+
+function spawnBoostBurst(){
+  const x = runnerScreenX() - 18, y = groundLine() - 28;
+  for(let i = 0; i < 22; i++) particle({
+    x:x + rand(-3, 4), y:y + rand(-12, 12),
+    vx:rand(-250, -80), vy:rand(-75, 75),
+    life:rand(.25, .55), maxLife:.55, r:rand(1.2, 3.4), drag:1.5,
+    color:Math.random() < .65 ? '#4fd1e0' : '#a78bfa',
+    shape:Math.random() < .45 ? 'streak' : 'dot'
+  });
+}
+
+function spawnStumbleSparks(){
+  const x = runnerScreenX() + rand(-8, 8), y = groundLine() - 2;
+  for(let i = 0; i < 25; i++) particle({
+    x, y, vx:rand(-150, 130), vy:rand(-180, -40),
+    life:rand(.25, .7), maxLife:.7, r:rand(1.2, 3), gravity:330, shape:'streak',
+    color:Math.random() < .55 ? '#fb7185' : '#f5a524'
+  });
+}
+
+function spawnCatchBurst(){
+  const x = runnerScreenX() - 20, y = groundLine() - 30;
+  for(let i = 0; i < 40; i++) particle({
+    x:x + rand(-20, 20), y:y + rand(-20, 20),
+    vx:rand(-210, 210), vy:rand(-180, 130),
+    life:rand(.35, .9), maxLife:.9, r:rand(1.5, 4), gravity:130, shape:'streak',
+    color:Math.random() < .6 ? '#fb7185' : '#7f1d3a'
+  });
+}
+
+function updateParticles(dt){
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.life -= dt;
+    if(p.life <= 0){ particles.splice(i, 1); continue; }
+    p.vx *= Math.max(0, 1 - p.drag * dt);
+    p.vy += p.gravity * dt;
+    p.x  += p.vx * dt;
+    p.y  += p.vy * dt;
+  }
+}
+
+function drawParticles(c){
+  if(!particles.length) return;
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  for(const p of particles){
+    const a = clamp(p.life / p.maxLife, 0, 1);
+    c.globalAlpha = a;
+    c.fillStyle = c.strokeStyle = p.color;
+    if(p.shape === 'streak'){
+      c.lineWidth = Math.max(1, p.r * .65);
+      c.beginPath();
+      c.moveTo(p.x, p.y);
+      c.lineTo(p.x - p.vx * .035, p.y - p.vy * .035);
+      c.stroke();
+    }else{
+      c.beginPath();
+      c.arc(p.x, p.y, p.r * a + .3, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  c.restore();
+}
+
+/* The corridor, back to front. `danger` rises as the monster closes and
+   `streakGlow` rises with a run of right answers; between them they tint
+   and quicken everything without anything being flashed over the top —
+   the child is reading numbers on the card below, and a strobing screen
+   competes with that. */
+function drawScene(){
+  const groundY = groundLine();
+  const sp   = stepPx();
+  const lead = G.runnerDraw - G.monsterDraw;
+  const danger     = clamp((3 - lead) / 3, 0, 1);
+  const streakGlow = clamp((G.streak - 2) / 12, 0, 1);
 
   cx.clearRect(0, 0, W, H);
   cx.save();
-  if(G.shake > 0){
-    cx.translate((Math.random() - .5) * G.shake * 14, (Math.random() - .5) * G.shake * 8);
-  }
 
-  // Corridor backdrop
+  const shake = G.shake + G.catchAnim * 0.45;
+  if(shake > 0) cx.translate(rand(-1, 1) * shake * 12, rand(-1, 1) * shake * 7);
+
   const sky = cx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, '#070d1d');
-  sky.addColorStop(0.62, '#0a1226');
-  sky.addColorStop(1, '#05080f');
+  sky.addColorStop(0, '#040814');
+  sky.addColorStop(0.48, danger > .55 ? '#120914' : '#081127');
+  sky.addColorStop(1, '#04070e');
   cx.fillStyle = sky; cx.fillRect(0, 0, W, H);
 
-  // Far pillars, slow parallax
-  cx.fillStyle = 'rgba(167,139,250,.06)';
-  const farGap = 150, farOff = (G.scroll * 0.25) % farGap;
-  for(let x = -farOff; x < W + farGap; x += farGap){
-    cx.fillRect(x, groundY - H * 0.46, 26, H * 0.46);
-  }
-
-  // Mid rail
-  cx.strokeStyle = 'rgba(79,209,224,.16)'; cx.lineWidth = 1;
-  cx.beginPath(); cx.moveTo(0, groundY - 34); cx.lineTo(W, groundY - 34); cx.stroke();
-
-  // Ground plate
-  cx.fillStyle = '#0b1224';
-  cx.fillRect(0, groundY, W, H - groundY);
-  cx.strokeStyle = 'rgba(167,139,250,.35)'; cx.lineWidth = 2;
-  cx.beginPath(); cx.moveTo(0, groundY); cx.lineTo(W, groundY); cx.stroke();
-
-  // Floor ticks — these carry the sense of speed
-  cx.strokeStyle = 'rgba(79,209,224,.22)'; cx.lineWidth = 2;
-  const tickGap = sp / 2, off = G.scroll % tickGap;
-  for(let x = -off; x < W + tickGap; x += tickGap){
-    cx.beginPath(); cx.moveTo(x, groundY + 6); cx.lineTo(x - 14, H); cx.stroke();
-  }
+  drawStars();
+  drawDistantCity(groundY);
+  drawFarStructures(groundY, danger);
+  drawSetPiece(groundY, danger);
+  drawMidStructures(groundY, danger);
+  drawFloor(groundY, sp, danger, streakGlow);
+  drawSpeedLines(streakGlow, danger);
 
   const rx = runnerScreenX();
-  const mx = rx - (G.runnerDraw - G.monsterDraw) * sp;
+  let   mx = rx - lead * sp;
+  // The lunge is a visual overshoot only — G.monster itself never moves
+  // for it, so nothing about it can end a run early.
+  if(G.monsterLunge > 0) mx += Math.sin((1 - G.monsterLunge) * Math.PI) * 24 * clamp(G.monsterLunge * 2, 0, 1);
 
-  drawMonster(mx, groundY, G.monPhase);
-  drawRunner(rx, groundY, G.runPhase);
+  drawMonster(mx, groundY, G.monPhase, lead, danger, G.catchAnim);
+  drawRunner(rx, groundY, G.runPhase, streakGlow);
+  drawParticles(cx);
 
   // Off-screen marker when the monster is far enough back to leave the frame
-  if(mx < -30){
-    const lead = (G.runnerDraw - G.monsterDraw).toFixed(1);
-    cx.fillStyle = 'rgba(251,113,133,.85)';
+  if(mx < -35){
+    cx.fillStyle = 'rgba(251,113,133,.9)';
     cx.font = '600 12px ' + getComputedStyle(document.body).fontFamily;
     cx.textAlign = 'left';
-    cx.fillText('◀ ' + lead + ' steps back', 12, groundY - 54);
+    cx.fillText('◀ ' + lead.toFixed(1) + ' steps back', 12, groundY - 54);
   }
+
+  const vign = cx.createRadialGradient(W * .55, H * .48, Math.min(W, H) * .18,
+                                       W * .55, H * .48, Math.max(W, H) * .68);
+  vign.addColorStop(0, 'rgba(0,0,0,0)');
+  vign.addColorStop(1, 'rgba(0,0,0,.52)');
+  cx.fillStyle = vign; cx.fillRect(0, 0, W, H);
 
   cx.restore();
 }
 
-function drawRunner(x, groundY, phase){
-  const s = Math.max(0.85, H / 260);
-  const bob = Math.abs(Math.sin(phase * 2)) * 3 * s;
-  const hipY = groundY - 42 * s - bob;
-  const swing = Math.sin(phase);
+// Starfield, drifting a little faster the nearer the layer.
+function drawStars(){
+  const base = G.scroll * .045;
+  cx.save();
+  for(let i = 0; i < 42; i++){
+    const span = W + 60;
+    const x = (((i * 173.7 - base * (1 + (i % 4) * .2)) % span) + span) % span - 30;
+    const y = 15 + (i * 61) % Math.max(40, H * .55);
+    const big = i % 7 === 0;
+    cx.fillStyle = 'rgba(190,220,255,' + (.16 + (i % 5) * .06) + ')';
+    cx.fillRect(x, y, big ? 1.8 : 1, big ? 1.8 : 1);
+  }
+  cx.restore();
+}
+
+function drawDistantCity(groundY){
+  const horizon = groundY - H * .36, off = (G.scroll * .12) % 96;
+  cx.save();
+  for(let x = -off - 40, i = 0; x < W + 100; x += 48, i++){
+    const h = 24 + (i % 5) * 11;
+    cx.fillStyle = 'rgba(18,39,70,.48)';
+    cx.fillRect(x, horizon - h, 34, h);
+    cx.fillStyle = 'rgba(79,209,224,.16)';
+    for(let y = horizon - h + 7; y < horizon - 5; y += 10)
+      for(let wx = x + 6; wx < x + 30; wx += 11)
+        if((i + Math.floor(y)) % 3) cx.fillRect(wx, y, 3, 2);
+  }
+  cx.restore();
+}
+
+function drawFarStructures(groundY, danger){
+  const top = groundY - H * .52, gap = 170, off = (G.scroll * .24) % gap;
+  cx.save();
+  for(let x = -off - 40; x < W + gap; x += gap){
+    cx.fillStyle = 'rgba(87,75,132,.13)';
+    cx.fillRect(x, top, 34, groundY - top);
+    cx.fillRect(x - 15, top, 64, 8);
+    cx.strokeStyle = 'rgba(167,139,250,.12)'; cx.lineWidth = 2;
+    cx.beginPath();
+    cx.moveTo(x + 4, top + 15);  cx.lineTo(x + 30, groundY - 15);
+    cx.moveTo(x + 30, top + 15); cx.lineTo(x + 4,  groundY - 15);
+    cx.stroke();
+    cx.fillStyle = danger > .5 ? 'rgba(251,113,133,.35)' : 'rgba(79,209,224,.25)';
+    cx.fillRect(x + 10, top + 12, 14, 3);
+  }
+  cx.restore();
+}
+
+// One landmark at a time, cycling through five, so the corridor reads as
+// somewhere you are getting through rather than a loop of wallpaper.
+function drawSetPiece(groundY, danger){
+  // The span has to outrun the canvas or the landmark pops back to the
+  // right before it has left on the left, and there is no gap between
+  // one and the next.
+  const span = W + 900, world = G.scroll * .55;
+  const slot = Math.floor(world / span), x = W - (world % span) + 80;
+  if(x < -220 || x > W + 220) return;
+  const type = ((slot % 5) + 5) % 5;
 
   cx.save();
-  cx.translate(x, 0);
+  if(type === 0){
+    cx.fillStyle = 'rgba(20,38,64,.75)'; cx.fillRect(x, groundY - H * .48, 120, H * .48);
+    cx.strokeStyle = 'rgba(79,209,224,.28)'; cx.lineWidth = 3;
+    cx.strokeRect(x + 10, groundY - H * .43, 98, H * .32);
+    cx.fillStyle = 'rgba(79,209,224,.07)'; cx.fillRect(x + 16, groundY - H * .40, 86, H * .24);
+    cx.fillStyle = 'rgba(79,209,224,.34)'; cx.fillRect(x + 55, groundY - H * .46, 12, 3);
+  }else if(type === 1){
+    cx.strokeStyle = 'rgba(117,137,171,.42)'; cx.lineWidth = 8;
+    cx.beginPath();
+    cx.moveTo(x, groundY - H * .40);
+    cx.bezierCurveTo(x + 35, groundY - H * .55, x + 90, groundY - H * .18, x + 145, groundY - H * .37);
+    cx.stroke();
+    cx.strokeStyle = 'rgba(79,209,224,.20)'; cx.lineWidth = 2; cx.stroke();
+  }else if(type === 2){
+    cx.save();
+    cx.translate(x + 60, groundY - H * .28);
+    cx.strokeStyle = 'rgba(167,139,250,.25)'; cx.lineWidth = 8;
+    cx.beginPath(); cx.arc(0, 0, 48, 0, Math.PI * 2); cx.stroke();
+    cx.strokeStyle = 'rgba(79,209,224,.22)'; cx.lineWidth = 4;
+    for(let i = 0; i < 6; i++){
+      cx.rotate(Math.PI / 3);
+      cx.beginPath(); cx.moveTo(10, 0); cx.lineTo(45, 0); cx.stroke();
+    }
+    cx.restore();
+  }else if(type === 3){
+    for(let i = 0; i < 3; i++){
+      const lift = (i % 2) * 18;
+      cx.fillStyle = 'rgba(25,44,72,.82)';
+      cx.fillRect(x + i * 48, groundY - 42 - lift, 40, 42 + lift);
+      cx.strokeStyle = 'rgba(245,165,36,.18)';
+      cx.strokeRect(x + i * 48 + 5, groundY - 35 - lift, 30, 25);
+    }
+  }else{
+    cx.fillStyle = 'rgba(33,48,72,.75)';
+    cx.fillRect(x, groundY - H * .45, 150, 18);
+    cx.fillRect(x + 12,  groundY - H * .45, 12, H * .45);
+    cx.fillRect(x + 126, groundY - H * .45, 12, H * .45);
+    cx.fillStyle = 'rgba(251,113,133,' + (danger > .3 ? .38 : .13) + ')';
+    cx.fillRect(x + 46, groundY - H * .42, 58, 4);
+  }
+  cx.restore();
+}
+
+function drawMidStructures(groundY, danger){
+  const off = (G.scroll * .58) % 230;
+  cx.save();
+  for(let x = -off - 80; x < W + 230; x += 230){
+    cx.fillStyle = 'rgba(4,9,18,.76)';   cx.fillRect(x, 0, 28, groundY - 48);
+    cx.fillStyle = 'rgba(39,60,90,.42)'; cx.fillRect(x + 5, 12, 6, groundY - 78);
+    cx.strokeStyle = 'rgba(79,209,224,.12)'; cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(x + 28, 18); cx.lineTo(x + 68, 52); cx.stroke();
+  }
+  cx.strokeStyle = 'rgba(79,209,224,.18)'; cx.lineWidth = 2;
+  cx.beginPath(); cx.moveTo(0, groundY - 42); cx.lineTo(W, groundY - 42); cx.stroke();
+  cx.strokeStyle = danger > .45 ? 'rgba(251,113,133,.35)' : 'rgba(117,137,171,.22)';
+  cx.lineWidth = 5;
+  cx.beginPath(); cx.moveTo(0, 28); cx.lineTo(W, 28); cx.stroke();
+  cx.restore();
+}
+
+// The floor carries the sense of speed, and brightens with the streak.
+function drawFloor(groundY, sp, danger, streakGlow){
+  const g = cx.createLinearGradient(0, groundY, 0, H);
+  g.addColorStop(0, '#101a2d'); g.addColorStop(1, '#05080e');
+  cx.fillStyle = g; cx.fillRect(0, groundY, W, H - groundY);
+
+  cx.strokeStyle = danger > .55 ? 'rgba(251,113,133,.52)' : 'rgba(167,139,250,.38)';
+  cx.lineWidth = 2;
+  cx.beginPath(); cx.moveTo(0, groundY); cx.lineTo(W, groundY); cx.stroke();
+
+  const panelGap = Math.max(60, sp * .72), off = G.scroll % panelGap;
+  cx.strokeStyle = 'rgba(79,209,224,' + (.12 + .12 * streakGlow) + ')';
+  cx.lineWidth = 1.5;
+  for(let x = -off; x < W + panelGap; x += panelGap){
+    cx.beginPath(); cx.moveTo(x, groundY + 5); cx.lineTo(x - 24, H); cx.stroke();
+  }
+
+  const dashOff = (G.scroll * 1.35) % 120;
+  cx.fillStyle = 'rgba(79,209,224,' + (.18 + .38 * streakGlow) + ')';
+  for(let x = -dashOff; x < W + 140; x += 120) cx.fillRect(x, groundY + 12, 55, 3);
+}
+
+function drawSpeedLines(streakGlow, danger){
+  const amt = Math.floor(3 + streakGlow * 15 + danger * 6);
+  if(amt <= 3) return;
+  cx.save();
+  cx.globalCompositeOperation = 'lighter';
+  cx.strokeStyle = 'rgba(79,209,224,' + (.05 + .11 * streakGlow) + ')';
+  cx.lineWidth = 1;
+  for(let i = 0; i < amt; i++){
+    const seed = i * 93.17 + Math.floor(G.elapsed * 5) * 17;
+    const span = W + 200;
+    const x = (((seed * 7 - G.scroll * (1.3 + streakGlow)) % span) + span) % span - 100;
+    const y = 20 + (seed * 2.1) % (H * .68);
+    const len = 18 + streakGlow * 75;
+    cx.beginPath(); cx.moveTo(x, y); cx.lineTo(x - len, y); cx.stroke();
+  }
+  cx.restore();
+}
+
+/* A suited runner with a pack on their back. `boost` fires the pack for
+   a moment on a right answer; `stumble` tips them backwards on a wrong
+   one; a long streak lights the whole suit. */
+function drawRunner(x, groundY, phase, streakGlow){
+  const s = Math.max(0.86, H / 285);
+  const bob   = Math.abs(Math.sin(phase * 2)) * 3 * s;
+  const swing = Math.sin(phase);
+  const boost   = clamp(G.boost   / 0.38, 0, 1);
+  const stumble = clamp(G.stumble / 0.55, 0, 1);
+  const lit  = Math.max(streakGlow, boost);
+  const tilt = stumble * Math.sin((1 - stumble) * Math.PI) * 0.34;
+  const hipY = groundY - 48 * s - bob + stumble * 4 * s;
+
+  // Shadow stays flat on the floor, so it is drawn before the tilt.
+  cx.save();
+  cx.fillStyle = 'rgba(0,0,0,.48)';
+  cx.beginPath(); cx.ellipse(x, groundY + 3, 20 * s, 5 * s, 0, 0, Math.PI * 2); cx.fill();
+  cx.restore();
+
+  // From here the origin is the runner's hip.
+  cx.save();
+  cx.translate(x, hipY);
+  cx.rotate(tilt);
   cx.lineCap = 'round';
 
-  // Shadow
-  cx.fillStyle = 'rgba(0,0,0,.45)';
-  cx.beginPath(); cx.ellipse(0, groundY + 3, 17 * s, 4.5 * s, 0, 0, Math.PI * 2); cx.fill();
+  if(lit > 0){
+    cx.save();
+    cx.globalCompositeOperation = 'lighter';
+    cx.strokeStyle = 'rgba(79,209,224,' + (.15 + .45 * lit) + ')';
+    cx.lineWidth = (7 + 10 * lit) * s;
+    cx.beginPath();
+    cx.moveTo(-12 * s, -17 * s);
+    cx.lineTo((-48 - 75 * boost - 35 * streakGlow) * s, -17 * s);
+    cx.stroke();
+    cx.restore();
+  }
 
-  // Legs
-  cx.strokeStyle = '#4fd1e0'; cx.lineWidth = 4.5 * s;
-  [swing, -swing].forEach((sw, i) => {
-    const kneeX = sw * 13 * s, kneeY = hipY + 15 * s;
-    const footX = sw * 20 * s + (sw > 0 ? 4 : -4) * s;
-    const footY = groundY - Math.max(0, sw) * 9 * s;
-    cx.globalAlpha = i ? 0.55 : 1;
-    cx.beginPath(); cx.moveTo(0, hipY); cx.lineTo(kneeX, kneeY); cx.lineTo(footX, footY); cx.stroke();
+  // Legs. A stumble shortens the stride and throws the feet forward.
+  [[swing * (1 - .45 * stumble), 1], [-swing * (1 - .45 * stumble), .62]].forEach(([sw, a], i) => {
+    const kneeX = sw * 14 * s + stumble * 10 * s;
+    const footX = sw * 22 * s + (sw > 0 ? 5 : -5) * s + stumble * 15 * s;
+    const footY = 47 * s - Math.max(0, sw) * 10 * s;
+    cx.globalAlpha = a;
+    cx.strokeStyle = i ? '#477b9d' : '#4fd1e0';
+    cx.lineWidth = 5 * s;
+    cx.beginPath(); cx.moveTo(0, 0); cx.lineTo(kneeX, 17 * s); cx.lineTo(footX, footY); cx.stroke();
+    cx.strokeStyle = '#cdeefe'; cx.lineWidth = 3 * s;
+    cx.beginPath(); cx.moveTo(footX - 3 * s, footY); cx.lineTo(footX + 9 * s, footY); cx.stroke();
   });
   cx.globalAlpha = 1;
 
   // Torso
-  cx.strokeStyle = '#eaf3ff'; cx.lineWidth = 7 * s;
-  cx.beginPath(); cx.moveTo(0, hipY); cx.lineTo(-2 * s, hipY - 24 * s); cx.stroke();
+  const suit = cx.createLinearGradient(-12 * s, -28 * s, 12 * s, 5 * s);
+  suit.addColorStop(0, '#f4f8ff'); suit.addColorStop(.55, '#9bc8dc'); suit.addColorStop(1, '#506b86');
+  cx.fillStyle = suit;
+  roundRectPath(cx, -9 * s, -29 * s, 17 * s, 31 * s, 6 * s); cx.fill();
+  cx.fillStyle = '#111a30'; cx.fillRect(-6 * s, -14 * s, 11 * s, 5 * s);
+  cx.fillStyle = '#a78bfa'; cx.fillRect(-4 * s, -13 * s, 7 * s, 2 * s);
+
+  // Pack, and its flame on a right answer
+  cx.fillStyle = '#23324d';
+  roundRectPath(cx, -17 * s, -26 * s, 9 * s, 21 * s, 3 * s); cx.fill();
+  cx.fillStyle = 'rgba(79,209,224,' + (.35 + .55 * lit) + ')';
+  cx.fillRect(-18 * s, -22 * s, 2 * s, 12 * s);
+  if(boost > .03){
+    cx.save();
+    cx.globalCompositeOperation = 'lighter';
+    const flame = 25 + 30 * boost;
+    const fg = cx.createLinearGradient(-18 * s, 0, (-18 - flame) * s, 0);
+    fg.addColorStop(0, 'rgba(234,243,255,.9)');
+    fg.addColorStop(.25, 'rgba(79,209,224,.9)');
+    fg.addColorStop(1, 'rgba(79,209,224,0)');
+    cx.fillStyle = fg;
+    cx.beginPath();
+    cx.moveTo(-17 * s, -19 * s);
+    cx.lineTo((-17 - flame) * s, -15 * s);
+    cx.lineTo(-17 * s, -11 * s);
+    cx.closePath(); cx.fill();
+    cx.restore();
+  }
 
   // Arms, counter-swinging
-  cx.strokeStyle = '#a78bfa'; cx.lineWidth = 4 * s;
-  [-swing, swing].forEach((sw, i) => {
-    const shoulderY = hipY - 21 * s;
-    cx.globalAlpha = i ? 0.6 : 1;
+  const armSwing = -swing * (1 - .35 * stumble);
+  [[armSwing, 1], [-armSwing, .62]].forEach(([sw, a], i) => {
+    cx.globalAlpha = a;
+    cx.strokeStyle = i ? '#6f5da3' : '#a78bfa';
+    cx.lineWidth = 4.5 * s;
     cx.beginPath();
-    cx.moveTo(-2 * s, shoulderY);
-    cx.lineTo(sw * 11 * s, shoulderY + 10 * s);
-    cx.lineTo(sw * 17 * s, shoulderY + 2 * s);
+    cx.moveTo(-1 * s, -25 * s);
+    cx.lineTo(sw * 12 * s, -14 * s);
+    cx.lineTo(sw * 18 * s, -22 * s);
     cx.stroke();
   });
   cx.globalAlpha = 1;
 
   // Helmet
-  cx.fillStyle = '#eaf3ff';
-  cx.beginPath(); cx.arc(-1 * s, hipY - 32 * s, 9 * s, 0, Math.PI * 2); cx.fill();
-  cx.fillStyle = '#0a1120';
-  cx.beginPath(); cx.arc(1.5 * s, hipY - 32 * s, 6 * s, -0.9, 1.1); cx.fill();
-  cx.fillStyle = 'rgba(79,209,224,.9)';
-  cx.beginPath(); cx.arc(3 * s, hipY - 33 * s, 2 * s, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = '#dce9f7';
+  cx.beginPath(); cx.arc(-1 * s, -39 * s, 11 * s, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = '#111b2e';
+  cx.beginPath(); cx.arc(2 * s, -39 * s, 8 * s, -1.05, 1.12); cx.fill();
+  cx.save();
+  cx.globalCompositeOperation = 'lighter';
+  cx.fillStyle = 'rgba(79,209,224,' + (.68 + .28 * lit) + ')';
+  cx.beginPath(); cx.ellipse(4 * s, -40 * s, 5 * s, 3 * s, -.08, 0, Math.PI * 2); cx.fill();
+  cx.restore();
+  cx.strokeStyle = '#a78bfa'; cx.lineWidth = 2 * s;
+  cx.beginPath(); cx.moveTo(-9 * s, -41 * s); cx.lineTo(-13 * s, -35 * s); cx.stroke();
+
+  // The halo only shows up once a streak is worth noticing.
+  if(streakGlow > .2){
+    cx.save();
+    cx.globalCompositeOperation = 'lighter';
+    cx.strokeStyle = 'rgba(167,139,250,' + (.15 + .35 * streakGlow) + ')';
+    cx.lineWidth = 2 * s;
+    cx.beginPath(); cx.arc(-1 * s, -38 * s, 17 * s, 0, Math.PI * 2); cx.stroke();
+    cx.restore();
+  }
 
   cx.restore();
 }
 
-function drawMonster(x, groundY, phase){
-  if(x < -90 || x > W + 90) return;
-  const s = Math.max(0.9, H / 250);
-  const bob = Math.sin(phase * 1.6) * 4 * s;
-  const bodyY = groundY - 34 * s + bob;
+/* The monster grows as it closes. That is the whole warning system: it
+   is small and far off when you are safe, and filling the frame when
+   you are not. */
+function drawMonster(x, groundY, phase, lead, danger, catchAnim){
+  if(x < -120 || x > W + 140) return;
+  const proximity = clamp((4 - lead) / 4, 0, 1);
+  const s = Math.max(0.9, H / 270) * (1 + proximity * .34 + catchAnim * .42);
+  const bob   = Math.sin(phase * 1.7) * 4 * s;
+  const bodyY = groundY - 37 * s + bob;
+  const jaw   = Math.max(0, Math.sin(phase * 1.3)) * (4 + 8 * proximity) * s + catchAnim * 9 * s;
 
   cx.save();
   cx.translate(x, 0);
 
-  cx.fillStyle = 'rgba(0,0,0,.5)';
-  cx.beginPath(); cx.ellipse(0, groundY + 3, 24 * s, 5.5 * s, 0, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = 'rgba(0,0,0,.55)';
+  cx.beginPath(); cx.ellipse(0, groundY + 3, 28 * s, 6 * s, 0, 0, Math.PI * 2); cx.fill();
+
+  if(proximity > .15){
+    cx.save();
+    cx.globalCompositeOperation = 'lighter';
+    const rg = cx.createRadialGradient(8 * s, bodyY, 4 * s, 8 * s, bodyY, 48 * s);
+    rg.addColorStop(0, 'rgba(251,60,93,' + (.18 + .22 * proximity) + ')');
+    rg.addColorStop(1, 'rgba(251,60,93,0)');
+    cx.fillStyle = rg;
+    cx.fillRect(-55 * s, bodyY - 50 * s, 120 * s, 105 * s);
+    cx.restore();
+  }
 
   // Scuttling legs
-  cx.strokeStyle = '#7f1d3a'; cx.lineWidth = 4 * s; cx.lineCap = 'round';
-  for(let i = -1; i <= 1; i++){
-    const sw = Math.sin(phase * 2.4 + i * 1.7) * 9 * s;
+  cx.strokeStyle = '#72122f'; cx.lineWidth = 4.5 * s; cx.lineCap = 'round';
+  for(let i = -2; i <= 2; i++){
+    const sw = Math.sin(phase * 2.5 + i * 1.5) * 10 * s * (1 + proximity * .3);
     cx.beginPath();
-    cx.moveTo(i * 11 * s, bodyY + 14 * s);
-    cx.lineTo(i * 15 * s + sw, groundY - 6 * s);
-    cx.lineTo(i * 17 * s + sw * 1.4, groundY);
+    cx.moveTo(i * 9 * s, bodyY + 13 * s);
+    cx.lineTo(i * 15 * s + sw, groundY - 8 * s);
+    cx.lineTo(i * 20 * s + sw * 1.25, groundY);
     cx.stroke();
   }
 
   // Body
-  const g = cx.createRadialGradient(0, bodyY - 6 * s, 3 * s, 0, bodyY, 30 * s);
-  g.addColorStop(0, '#fb7185');
-  g.addColorStop(0.55, '#9f1239');
-  g.addColorStop(1, '#3f0a1c');
+  const g = cx.createRadialGradient(8 * s, bodyY - 9 * s, 3 * s, 0, bodyY, 34 * s);
+  g.addColorStop(0, '#ff8a98'); g.addColorStop(.35, '#be2348');
+  g.addColorStop(.72, '#72122f'); g.addColorStop(1, '#2d0715');
   cx.fillStyle = g;
-  cx.beginPath(); cx.ellipse(0, bodyY, 26 * s, 22 * s, 0, 0, Math.PI * 2); cx.fill();
+  cx.beginPath(); cx.ellipse(0, bodyY, 29 * s, 24 * s, 0, 0, Math.PI * 2); cx.fill();
 
   // Spines
-  cx.fillStyle = '#7f1d3a';
-  for(let i = -2; i <= 2; i++){
+  cx.fillStyle = '#68102a';
+  for(let i = -3; i <= 2; i++){
     cx.beginPath();
-    cx.moveTo(i * 9 * s - 4 * s, bodyY - 18 * s);
-    cx.lineTo(i * 9 * s,         bodyY - 30 * s);
-    cx.lineTo(i * 9 * s + 4 * s, bodyY - 18 * s);
+    cx.moveTo(i * 8 * s - 4 * s, bodyY - 19 * s);
+    cx.lineTo(i * 8 * s,         bodyY - (32 + (i % 2 ? 6 : 0)) * s);
+    cx.lineTo(i * 8 * s + 4 * s, bodyY - 19 * s);
+    cx.closePath(); cx.fill();
+  }
+
+  // Mouth, opening wider the closer it gets
+  cx.fillStyle = '#2b0612';
+  cx.beginPath(); cx.ellipse(12 * s, bodyY + 8 * s + jaw * .25, 18 * s, 9 * s + jaw * .2, 0, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = '#fff1f2';
+  for(let i = 0; i < 6; i++){
+    const tx = (1 + i * 5) * s;
+    cx.beginPath();
+    cx.moveTo(tx, bodyY + 3 * s);
+    cx.lineTo(tx + 2.3 * s, bodyY + 11 * s + jaw);
+    cx.lineTo(tx + 4.5 * s, bodyY + 3 * s);
     cx.closePath(); cx.fill();
   }
 
   // Eyes, fixed on the runner
-  cx.fillStyle = '#fde68a';
-  [[8, -6], [19, -4]].forEach(([ex, ey]) => {
-    cx.beginPath(); cx.ellipse(ex * s, bodyY + ey * s, 5 * s, 5.6 * s, 0, 0, Math.PI * 2); cx.fill();
+  cx.save();
+  cx.globalCompositeOperation = 'lighter';
+  cx.fillStyle = 'rgba(255,225,110,' + (.75 + .25 * proximity) + ')';
+  [[8, -7], [20, -5]].forEach(([ex, ey]) => {
+    cx.beginPath(); cx.ellipse(ex * s, bodyY + ey * s, 5.5 * s, 6 * s, 0, 0, Math.PI * 2); cx.fill();
   });
+  cx.restore();
   cx.fillStyle = '#180208';
-  [[9.5, -6], [20.5, -4]].forEach(([ex, ey]) => {
-    cx.beginPath(); cx.ellipse(ex * s, bodyY + ey * s, 2 * s, 3.2 * s, 0, 0, Math.PI * 2); cx.fill();
+  [[10, -7], [22, -5]].forEach(([ex, ey]) => {
+    cx.beginPath(); cx.ellipse(ex * s, bodyY + ey * s, 2 * s, 3.4 * s, 0, 0, Math.PI * 2); cx.fill();
   });
 
-  // Teeth
-  cx.fillStyle = '#fff1f2';
-  for(let i = 0; i < 5; i++){
-    const tx = (6 + i * 4.6) * s;
+  // A reaching limb, only once it is genuinely close
+  if(proximity > .45){
+    cx.strokeStyle = 'rgba(251,113,133,' + (.18 + .35 * proximity) + ')';
+    cx.lineWidth = 2 * s;
     cx.beginPath();
-    cx.moveTo(tx, bodyY + 8 * s);
-    cx.lineTo(tx + 2.4 * s, bodyY + 15 * s);
-    cx.lineTo(tx + 4.8 * s, bodyY + 8 * s);
-    cx.closePath(); cx.fill();
+    cx.moveTo(22 * s, bodyY - 3 * s);
+    cx.lineTo((44 + 25 * proximity) * s, bodyY - (14 + Math.sin(phase) * 8) * s);
+    cx.stroke();
   }
 
   cx.restore();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Menu banner and game-over still
+
+   Both measure themselves as they draw. sizeCanvas() runs while their
+   screens are hidden — a hidden canvas measures zero — so neither can
+   rely on having been sized for it.
+══════════════════════════════════════════════════════════════ */
+let menuW = 0, menuH = 0, menuFitAt = -1;
+
+function drawMenuScene(dt){
+  const rect = menuCv.getBoundingClientRect();
+  if(rect.width < 2) return;                       // hidden; nothing to draw on
+  if(rect.width !== menuFitAt){                    // resizing clears the canvas, so only on a real change
+    [menuW, menuH] = fitCanvas(menuCv, menuCx, 320, 90);
+    menuFitAt = rect.width;
+  }
+  const w = menuW, h = menuH, gy = h * .82;
+  G.menuT += dt;
+
+  menuCx.clearRect(0, 0, w, h);
+  const g = menuCx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, 'rgba(5,10,24,0)');
+  g.addColorStop(.7, 'rgba(9,20,38,.85)');
+  g.addColorStop(1, 'rgba(4,7,15,.25)');
+  menuCx.fillStyle = g; menuCx.fillRect(0, 0, w, h);
+
+  const scroll = G.menuT * 70;
+  menuCx.strokeStyle = 'rgba(79,209,224,.16)';
+  for(let x = -(scroll % 75); x < w + 75; x += 75){
+    menuCx.beginPath(); menuCx.moveTo(x, gy); menuCx.lineTo(x - 18, h); menuCx.stroke();
+  }
+  menuCx.fillStyle = 'rgba(167,139,250,.07)';
+  for(let x = -((scroll * .25) % 140); x < w + 140; x += 140) menuCx.fillRect(x, 18, 22, gy - 18);
+
+  drawSimpleMonster(menuCx, w * .30, gy, .78);
+  drawSimpleRunner(menuCx, w * .70, gy, .70, true);
+}
+
+let overRecord = false;
+
+function drawOverScene(record){
+  overRecord = record;
+  const [w, h] = fitCanvas(overCv, overCx, 320, 150);
+  const gy = h * .82;
+
+  overCx.clearRect(0, 0, w, h);
+  const g = overCx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#070b18'); g.addColorStop(1, '#150711');
+  overCx.fillStyle = g; overCx.fillRect(0, 0, w, h);
+  overCx.strokeStyle = 'rgba(251,113,133,.16)';
+  for(let x = 0; x < w; x += 70){
+    overCx.beginPath(); overCx.moveTo(x, gy); overCx.lineTo(x - 20, h); overCx.stroke();
+  }
+  overCx.fillStyle = 'rgba(167,139,250,.07)';
+  for(let x = 30; x < w; x += 145) overCx.fillRect(x, 25, 22, gy - 25);
+  overCx.font = '700 12px ' + getComputedStyle(document.body).fontFamily;
+  overCx.textAlign = 'center';
+
+  if(record){
+    overCx.save();
+    overCx.globalCompositeOperation = 'lighter';
+    const rg = overCx.createRadialGradient(w * .5, h * .46, 8, w * .5, h * .46, 90);
+    rg.addColorStop(0, 'rgba(245,165,36,.32)'); rg.addColorStop(1, 'rgba(245,165,36,0)');
+    overCx.fillStyle = rg; overCx.fillRect(w * .5 - 100, 0, 200, h);
+    overCx.restore();
+    // Scales chosen so nothing reaches the caption line at y=20.
+    drawSimpleRunner(overCx, w * .5, gy, 1.05, true);
+    overCx.fillStyle = 'rgba(245,165,36,.8)';
+    overCx.fillText('OUTRAN THE OLD RECORD', w * .5, 20);
+  }else{
+    drawSimpleMonster(overCx, w * .42, gy, 1.45);
+    drawSimpleRunner(overCx, w * .70, gy, .95, false);
+    overCx.fillStyle = 'rgba(251,113,133,.75)';
+    overCx.fillText('CAUGHT', w * .5, 20);
+  }
+}
+
+// Still poses, for the two canvases that are not running a game loop.
+function drawSimpleRunner(c, x, gy, s, glow){
+  c.save();
+  c.translate(x, gy);
+  if(glow){ c.shadowBlur = 24; c.shadowColor = '#4fd1e0'; }
+  c.strokeStyle = '#4fd1e0'; c.lineWidth = 5 * s; c.lineCap = 'round';
+  c.beginPath();
+  c.moveTo(0, -42 * s); c.lineTo(-11 * s, -18 * s); c.lineTo(-19 * s, 0);
+  c.moveTo(-9 * s, -20 * s); c.lineTo(16 * s, -5 * s);
+  c.stroke();
+  c.strokeStyle = '#eaf3ff'; c.lineWidth = 8 * s;
+  c.beginPath(); c.moveTo(0, -43 * s); c.lineTo(-4 * s, -67 * s); c.stroke();
+  c.fillStyle = '#eaf3ff';
+  c.beginPath(); c.arc(-3 * s, -78 * s, 10 * s, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#112033';
+  c.beginPath(); c.arc(1 * s, -78 * s, 7 * s, -1, 1.1); c.fill();
+  c.restore();
+}
+
+function drawSimpleMonster(c, x, gy, s){
+  c.save();
+  c.translate(x, gy);
+  c.shadowBlur = 24; c.shadowColor = '#fb315f';
+  c.fillStyle = '#72122f';
+  c.beginPath(); c.ellipse(0, -38 * s, 32 * s, 26 * s, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#fde68a';
+  c.beginPath(); c.arc(10 * s, -45 * s, 6 * s, 0, Math.PI * 2); c.arc(24 * s, -42 * s, 6 * s, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#180208';
+  c.beginPath(); c.arc(12 * s, -45 * s, 2.5 * s, 0, Math.PI * 2); c.arc(26 * s, -42 * s, 2.5 * s, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#fff1f2';
+  for(let i = 0; i < 5; i++){
+    c.beginPath();
+    c.moveTo((4 + i * 6) * s, -27 * s);
+    c.lineTo((7 + i * 6) * s, -13 * s);
+    c.lineTo((10 + i * 6) * s, -27 * s);
+    c.fill();
+  }
+  c.restore();
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -992,19 +1520,28 @@ function frame(now){
     updateDanger();
   }
 
-  // Eased draw positions so steps glide instead of snapping
-  G.runnerDraw  += (G.runner  - G.runnerDraw)  * Math.min(1, dt * 7);
+  // Eased draw positions so steps glide instead of snapping. A boosted
+  // step catches up faster, which is what makes it read as a surge.
+  G.runnerDraw  += (G.runner  - G.runnerDraw)  * Math.min(1, dt * (G.boost > 0 ? 11 : 7));
   G.monsterDraw += (G.monster - G.monsterDraw) * Math.min(1, dt * 12);
 
-  const moving = G.running && !G.paused;
+  // The catch animation keeps the world moving for its own beat after
+  // the run has ended.
+  const moving = (G.running && !G.paused) || G.catchAnim > 0;
   if(moving){
-    G.runPhase += dt * 11;
-    G.monPhase += dt * (5 + G.speed * 2.5);
-    G.scroll   += dt * 150;
+    G.runPhase += dt * (11 + G.boost * 6);
+    G.monPhase += dt * (5 + G.speed * 2.5 + G.monsterLunge * 6);
+    G.scroll   += dt * (150 + G.streak * 1.8 + G.boost * 150);
   }
-  if(G.shake > 0) G.shake = Math.max(0, G.shake - dt * 1.4);
+  if(G.shake > 0)        G.shake        = Math.max(0, G.shake - dt * 1.7);
+  if(G.boost > 0)        G.boost        = Math.max(0, G.boost - dt);
+  if(G.stumble > 0)      G.stumble      = Math.max(0, G.stumble - dt);
+  if(G.monsterLunge > 0) G.monsterLunge = Math.max(0, G.monsterLunge - dt * 1.2);
+  if(G.catchAnim > 0)    G.catchAnim    = Math.max(0, G.catchAnim - dt * 0.9);
+  updateParticles(dt);
 
-  if($('screen-game').classList.contains('active')) drawScene(dt);
+  if($('screen-game').classList.contains('active')) drawScene();
+  if($('screen-menu').classList.contains('active')) drawMenuScene(dt);
   drawConfetti(dt);
   requestAnimationFrame(frame);
 }
