@@ -21,6 +21,9 @@
      GET    /progress/:slug
      PUT    /progress/:slug
 
+     GET    /math/settings
+     PUT    /math/settings/:studentId
+
      GET    /spelling/words
      POST   /spelling/words
      POST   /spelling/words/bulk
@@ -544,6 +547,134 @@ async function handlePutProgress(request, env, slug) {
        ON CONFLICT (user_id, tool_slug) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
       [session.user_id, slug, JSON.stringify(state)]);
     return json(request, { ok: true });
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FACT RUNNER — per-learner number ranges
+   ──────────────────────────────────────────────────────────────
+   A parent decides which operations each child practises and the
+   numbers each one draws from, so one child can grind the 1–8 times
+   tables while another adds inside 20. Absent row means the ranges
+   the game shipped with, so nobody has to be configured first.
+
+   The Worker owns the limits. Whatever the browser sends goes
+   through normalizeMathSettings before it is stored, and again on
+   the way out, so a stale or hand-edited row can never hand the
+   game a range it cannot draw from.
+══════════════════════════════════════════════════════════════ */
+
+// Per operation, the knobs a parent can turn: each field's default
+// [min, max] and the hard floor and ceiling it can be dragged
+// between. Division's divisor floors at 1 — dividing by zero has no
+// answer to type. Mirrored by OPS in games/fact-runner.html.
+const MATH_OPS = {
+  mul: { a:        { def: [1, 12],  lo: 0, hi: 100  },
+         b:        { def: [1, 12],  lo: 0, hi: 100  } },
+  div: { divisor:  { def: [1, 12],  lo: 1, hi: 100  },
+         quotient: { def: [1, 12],  lo: 0, hi: 100  } },
+  add: { a:        { def: [1, 100], lo: 0, hi: 1000 },
+         b:        { def: [1, 100], lo: 0, hi: 1000 } },
+  sub: { a:        { def: [1, 100], lo: 0, hi: 1000 },
+         b:        { def: [1, 100], lo: 0, hi: 1000 } },
+};
+
+function normalizeMathSettings(raw) {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const out = {};
+
+  for (const [op, fields] of Object.entries(MATH_OPS)) {
+    const given = (src[op] && typeof src[op] === 'object') ? src[op] : {};
+    const set = { on: given.on !== false };
+
+    for (const [name, spec] of Object.entries(fields)) {
+      const g = (given[name] && typeof given[name] === 'object') ? given[name] : {};
+      let min = clampInt(g.min ?? spec.def[0], spec.lo, spec.hi);
+      let max = clampInt(g.max ?? spec.def[1], spec.lo, spec.hi);
+      if (min > max) [min, max] = [max, min];   // a backwards range is a typo, not an error
+      set[name] = { min, max };
+    }
+    // Subtraction is the only place a negative answer can turn up, and
+    // whether that is a lesson or a wall depends entirely on the child.
+    if (op === 'sub') set.negatives = given.negatives !== false;
+    out[op] = set;
+  }
+
+  // Every operation switched off leaves nothing to ask.
+  if (!Object.values(out).some(set => set.on)) out.mul.on = true;
+  return out;
+}
+
+async function getMathSettings(env, userId) {
+  const r = await query(env,
+    `SELECT settings FROM math_fact_settings WHERE user_id = $1`, [userId]);
+  return normalizeMathSettings(r.rows?.[0]?.settings);
+}
+
+// The game asks for this once at boot. A parent gets their own set
+// (they can play to test) plus every learner in the family, so the
+// crew panel is one request rather than one per child.
+async function handleGetMathSettings(request, env) {
+  return withUser(request, env, async (session) => {
+    const family = await getMembership(env, session.user_id);
+    const isParent = family?.role === 'parent';
+
+    const payload = {
+      settings:  await getMathSettings(env, session.user_id),
+      is_parent: isParent,
+      students:  [],
+    };
+    if (!isParent) return json(request, payload);
+
+    const r = await query(env,
+      `SELECT u.id, u.display_name, u.email, u.avatar_key,
+              ms.settings, ms.updated_at
+         FROM family_members fm
+         JOIN users u ON u.id = fm.user_id
+         LEFT JOIN math_fact_settings ms ON ms.user_id = u.id
+        WHERE fm.family_id = $1 AND fm.role = 'learner'
+        ORDER BY fm.added_at`,
+      [family.id]);
+
+    payload.students = (r.rows || []).map(row => ({
+      id:           row.id,
+      display_name: row.display_name,
+      email:        row.email,
+      avatar_key:   row.avatar_key,
+      settings:     normalizeMathSettings(row.settings),
+      updated_at:   row.settings ? row.updated_at : null,
+    }));
+    return json(request, payload);
+  });
+}
+
+// A whole set at a time, not a patch: the panel always holds the
+// complete picture, and replacing it wholesale means a half-applied
+// change can't leave a child with ranges nobody chose.
+async function handlePutMathSettings(request, env, studentId) {
+  return withUser(request, env, async (session) => {
+    const me = await getMembership(env, session.user_id);
+    if (!me || me.role !== 'parent') {
+      return err(request, 'Only a parent can set practice ranges.', 403);
+    }
+    // A parent's own id passes this — setting your own ranges to match
+    // a child's is how you check what they are about to be handed.
+    const them = await getMembership(env, studentId);
+    if (!them || them.id !== me.id) {
+      return err(request, 'That learner is not in your family.', 403);
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const settings = normalizeMathSettings(body.settings);
+
+    await query(env,
+      `INSERT INTO math_fact_settings (user_id, settings, updated_by)
+       VALUES ($1, $2::jsonb, $3)
+       ON CONFLICT (user_id) DO UPDATE
+         SET settings = EXCLUDED.settings, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [studentId, JSON.stringify(settings), session.user_id]);
+
+    return json(request, { settings });
   });
 }
 
@@ -2955,6 +3086,11 @@ export default {
       const progressMatch = path.match(/^\/progress\/([a-z0-9-]{1,40})$/);
       if (progressMatch && method === 'GET') return await handleGetProgress(request, env, progressMatch[1]);
       if (progressMatch && method === 'PUT') return await handlePutProgress(request, env, progressMatch[1]);
+
+      if (path === '/math/settings' && method === 'GET') return await handleGetMathSettings(request, env);
+
+      const mathSettingsMatch = path.match(/^\/math\/settings\/([0-9a-fA-F-]{36})$/);
+      if (mathSettingsMatch && method === 'PUT') return await handlePutMathSettings(request, env, mathSettingsMatch[1]);
 
       if (path === '/spelling/words'      && method === 'GET')  return await handleGetSpellingWords(request, env);
       if (path === '/spelling/words'      && method === 'POST') return await handleAddSpellingWord(request, env);

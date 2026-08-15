@@ -66,6 +66,7 @@ Differences from condscript's auth, all deliberate:
 - `tools` — the module registry that renders the homepage grid
 - `tool_access` — per-learner enable/disable, set by a parent
 - `tool_progress` — generic `jsonb` state bucket, one row per (user, tool)
+- `math_fact_settings` — Fact Runner number ranges, set per learner by a parent
 - `module_sessions` — one row per stretch of time someone spent in a module
 - `activity_log` — append-only event stream; still unused
 
@@ -82,7 +83,8 @@ it, followed by each file in `migrations/` in numerical order. Every one of them
 is idempotent, so re-running is safe. Copy the **pooled** connection string.
 
 Run the migrations **before** deploying a Worker that needs them — `/parents/*`
-and `/activity/beat` query tables that migration 004 creates.
+and `/activity/beat` query tables that migration 004 creates, and `/math/settings`
+queries one that 006 creates.
 
 ### 2. Worker
 
@@ -149,6 +151,8 @@ email. They can sign in from that point on.
 | PATCH | `/tools/:slug/access` | `{email, enabled}` — parent only |
 | GET | `/progress/:slug` | `{state, updated_at}` |
 | PUT | `/progress/:slug` | `{state}` — arbitrary JSON object |
+| GET | `/math/settings` | your Fact Runner ranges; parents also get the roster |
+| PUT | `/math/settings/:studentId` | `{settings}` — parent only, same family |
 | POST | `/spanish/session` | starts a session; enforces the budget gates |
 | POST | `/spanish/session/:id/turn` | one exchange → reply text + mp3 |
 | POST | `/spanish/session/:id/end` | aggregates, summary, next lesson plan |
@@ -229,7 +233,8 @@ answer and then **repeats until it is answered correctly**. The monster behind
 advances continuously and accelerates with both elapsed time and score, so a run
 always ends eventually — the score is how long you held it off.
 
-Problem sets, all selectable independently:
+Problem sets, all selectable independently. These are the defaults, and what
+anyone with no ranges of their own gets:
 
 | Set | Range |
 | --- | --- |
@@ -238,9 +243,37 @@ Problem sets, all selectable independently:
 | Addition | 1–100 + 1–100 |
 | Subtraction | 1–100 − 1–100, answers −99 to 99 |
 
-State lives in `tool_progress` under `math-facts`: best score, run count,
-furthest distance, chosen operations, mute. No new tables and no new endpoints —
-it rides the generic `/progress/:slug` pair.
+#### Practice ranges
+
+A parent opening Fact Runner gets a **crew panel** under the practice set: one
+tab per learner (and one for themselves), and per operation a switch plus the
+numbers it draws from. So one child can grind 1–8 × 1–8 while another does
+2–9 + 2–9 and nothing else — the point being that a child drilling the facts
+they already own is not practising.
+
+| Operation | What a parent sets | Limits |
+| --- | --- | --- |
+| Multiplication | both factors' ranges | 0–100 |
+| Division | divisor and answer ranges | divisor 1–100, answer 0–100 |
+| Addition | both addends' ranges | 0–1000 |
+| Subtraction | both numbers' ranges, and whether answers may go below zero | 0–1000 |
+
+Division builds the problem from the answer (`dividend = answer × divisor`), so
+it always divides evenly whatever the ranges are. Subtraction with negatives
+switched off redraws for a non-negative pair, and if the ranges make that
+unlikely — 1–5 minus 10–20 — it puts the larger number first rather than hand
+over the thing the setting exists to prevent.
+
+Ranges live in `math_fact_settings` (migration 006), one jsonb row per person,
+written only by a parent and only for their own family. **The Worker owns the
+limits**: everything is normalised on the way in and again on the way out, so a
+stale row can't hand the game a range it cannot draw from.
+
+The learner still chooses which of the operations left switched on they want to
+drill today; an operation a parent switched off shows on their menu greyed out
+and cannot be switched back on. That choice, along with best score, run count,
+furthest distance and mute, stays in `tool_progress` under `math-facts` on the
+generic `/progress/:slug` pair.
 
 ### Spanish Coach
 

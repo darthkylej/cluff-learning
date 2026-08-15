@@ -93,6 +93,50 @@
   .op .nm{ font-size:.88rem; font-weight:600; }
   .op .rng{ display:block; font-size:.68rem; color:var(--muted); font-weight:400; margin-top:2px; }
   .op input{ display:none; }
+  /* Switched off by a parent — visible, so the child can see what they
+     are not being asked, but not something they can switch back on. */
+  .op.locked{ opacity:.42; cursor:not-allowed; }
+  .op.locked:hover{ border-color:var(--line); }
+
+  /* ── Crew practice ranges (parents only) ─────────────────────── */
+  .crewtabs{ display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .crewtab{ font-family:var(--font-mono); font-size:.64rem; letter-spacing:.14em;
+    text-transform:uppercase; padding:8px 12px; border:1px solid var(--line);
+    border-radius:var(--r); background:rgba(10,17,32,.6); color:var(--muted);
+    cursor:pointer; transition:border-color .15s, color .15s, background .15s; }
+  .crewtab:hover{ border-color:var(--line-mid); color:var(--hull); }
+  .crewtab.on{ border-color:var(--line-hot); background:rgba(167,139,250,.14); color:var(--hull); }
+
+  .opset{ border:1px solid var(--line); border-radius:var(--r); padding:12px 14px;
+    margin-bottom:10px; background:rgba(10,17,32,.5); }
+  .opset.off{ opacity:.5; }
+  .opset.off .opset-grid, .opset.off .opnote, .opset.off .opeg{ display:none; }
+  .opset-head{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .opset-head .opsym{ font-size:1.2rem; font-weight:800; color:var(--violet);
+    width:20px; text-align:center; }
+  .opset-head .opname{ font-weight:600; font-size:.9rem; }
+  .opset-head .opeg{ margin-left:auto; font-family:var(--font-mono); font-size:.66rem;
+    color:var(--muted); }
+  .opset-head button{ padding:5px 10px; font-size:10.5px; }
+  .opset-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+    gap:10px 20px; margin-top:12px; }
+  .rngfield{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .rngfield .lbl{ font-family:var(--font-mono); font-size:.58rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted); min-width:96px; }
+  .rngfield input{ width:4.4em; background:rgba(4,7,15,.7); border:1px solid var(--line-mid);
+    border-radius:var(--r); color:var(--hull); font-family:var(--font-mono);
+    font-size:.9rem; padding:6px 7px; text-align:center; }
+  .rngfield input:focus{ outline:none; border-color:var(--line-hot);
+    box-shadow:0 0 16px -6px rgba(167,139,250,.7); }
+  .rngfield em{ font-style:normal; color:var(--muted); font-size:.68rem; }
+  .opnote{ margin:10px 0 0; font-size:.75rem; color:var(--muted); }
+  .opnote label{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+  .opnote input[type=checkbox]{ accent-color:var(--violet); width:15px; height:15px; }
+  .crewfoot{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; }
+  #crewSave{ font-family:var(--font-mono); font-size:.6rem; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--muted); }
+  #crewSave.ok{ color:var(--lime); }
+  #crewSave.bad{ color:var(--magenta); }
 
   .stats{ display:flex; gap:22px; flex-wrap:wrap; justify-content:center; margin:14px 0; }
   .stat{ text-align:center; }
@@ -229,15 +273,32 @@
       <h3>Practice set</h3>
       <div class="ops">
         <label class="op" data-op="mul"><input type="checkbox" checked /><span class="sym">×</span>
-          <span class="nm">Multiplication<span class="rng">1–12 × 1–12</span></span></label>
+          <span class="nm">Multiplication<span class="rng"></span></span></label>
         <label class="op" data-op="div"><input type="checkbox" checked /><span class="sym">÷</span>
-          <span class="nm">Division<span class="rng">up to 144 ÷ 1–12, no remainder</span></span></label>
+          <span class="nm">Division<span class="rng"></span></span></label>
         <label class="op" data-op="add"><input type="checkbox" checked /><span class="sym">+</span>
-          <span class="nm">Addition<span class="rng">1–100 + 1–100</span></span></label>
+          <span class="nm">Addition<span class="rng"></span></span></label>
         <label class="op" data-op="sub"><input type="checkbox" checked /><span class="sym">−</span>
-          <span class="nm">Subtraction<span class="rng">1–100 − 1–100, can go negative</span></span></label>
+          <span class="nm">Subtraction<span class="rng"></span></span></label>
       </div>
       <p class="tiny muted" id="opWarn" style="margin:10px 0 0">&nbsp;</p>
+    </div>
+
+    <!-- Parents only. Populated from /math/settings, which returns the
+         learner roster alongside the caller's own set. -->
+    <div class="panelbox hidden" id="crewPanel">
+      <h3>Practice ranges for your crew</h3>
+      <p class="tiny muted" style="margin:-4px 0 14px">
+        Pick a runner, then set the numbers each operation draws from. Saved to their
+        account — they get the new ranges the next time they play. Anything you switch
+        off here they cannot switch back on.
+      </p>
+      <div class="crewtabs" id="crewTabs"></div>
+      <div id="crewEditor"></div>
+      <div class="crewfoot">
+        <button id="btnCrewReset" class="ghost">Reset to defaults</button>
+        <span id="crewSave">&nbsp;</span>
+      </div>
     </div>
 
     <div class="row center" style="margin:22px 0">
@@ -252,7 +313,7 @@
         <li><b>Correct</b> — a bright bling, the numbers flash green, and you take a step forward.</li>
         <li><b>Wrong</b> — a buzzer, the numbers flash red, and you slip a step back. The answer is shown, then <b>the same problem comes back</b> until you get it right.</li>
         <li>The monster never stops, and it speeds up the longer you last. Distance is the only thing keeping it off you.</li>
-        <li>Negative answers are fine — type the minus sign, or tap <b>±</b>.</li>
+        <li id="negLine">Negative answers are fine — type the minus sign, or tap <b>±</b>.</li>
         <li>Press <b>Esc</b> to pause.</li>
       </ul>
     </div>
@@ -425,6 +486,11 @@ const Sound = (function(){
 /* ══════════════════════════════════════════════════════════════
    Problems
 
+   Which operations are asked, and the numbers each one draws from,
+   are set per learner by a parent and fetched at boot. The defaults
+   below are what the game shipped with, and are what anyone with no
+   settings of their own still gets:
+
    Multiplication  a × b, both 1–12.
    Division        dividend ÷ divisor where the dividend is a 1–12
                    times-table product (so ≤ 144) and it always
@@ -432,23 +498,83 @@ const Sound = (function(){
    Addition        a + b, both 1–100.
    Subtraction     a − b, both 1–100 — the answer may be negative.
 ══════════════════════════════════════════════════════════════ */
-const OP_SYM = { mul:'×', div:'÷', add:'+', sub:'−' };
+const OP_SYM  = { mul:'×', div:'÷', add:'+', sub:'−' };
+const OP_NAME = { mul:'Multiplication', div:'Division', add:'Addition', sub:'Subtraction' };
+
+// Each operation's editable fields: default [min,max] and the hard
+// floor and ceiling. Mirrors MATH_OPS in worker.js — the Worker
+// re-clamps everything, so this copy only shapes the editor.
+const OPS = {
+  mul: { a:        { label:'First number',  def:[1,12],  lo:0, hi:100  },
+         b:        { label:'Second number', def:[1,12],  lo:0, hi:100  } },
+  div: { divisor:  { label:'Divide by',     def:[1,12],  lo:1, hi:100  },
+         quotient: { label:'Answer',        def:[1,12],  lo:0, hi:100  } },
+  add: { a:        { label:'First number',  def:[1,100], lo:0, hi:1000 },
+         b:        { label:'Second number', def:[1,100], lo:0, hi:1000 } },
+  sub: { a:        { label:'First number',  def:[1,100], lo:0, hi:1000 },
+         b:        { label:'Second number', def:[1,100], lo:0, hi:1000 } },
+};
+
+function defaultSettings(){
+  const out = {};
+  for(const [op, fields] of Object.entries(OPS)){
+    const set = { on:true };
+    for(const [name, spec] of Object.entries(fields)) set[name] = { min:spec.def[0], max:spec.def[1] };
+    if(op === 'sub') set.negatives = true;
+    out[op] = set;
+  }
+  return out;
+}
+
+// The set the person at the keyboard is practising.
+let SETTINGS = defaultSettings();
+
+const pick = r => randInt(r.min, r.max);
+
+// A parent can switch an operation off; inside what is left, the
+// runner still picks what to drill today.
+function activeOps(){
+  const allowed = Object.keys(OPS).filter(k => SETTINGS[k].on);
+  const chosen  = allowed.filter(k => SAVE.ops[k]);
+  return chosen.length ? chosen : allowed;
+}
 
 function makeProblem(){
-  const pool = Object.keys(SAVE.ops).filter(k => SAVE.ops[k]);
+  const pool = activeOps();
   const op = pool[randInt(0, pool.length - 1)];
+  const s  = SETTINGS[op];
+
   if(op === 'mul'){
-    const a = randInt(1,12), b = randInt(1,12);
+    const a = pick(s.a), b = pick(s.b);
     return { op, a, b, answer:a * b };
   }
   if(op === 'div'){
-    const q = randInt(1,12), d = randInt(1,12);
-    return { op, a:q * d, b:d, answer:q };
+    const d = pick(s.divisor), q = pick(s.quotient);
+    return { op, a:q * d, b:d, answer:q };   // built from the answer, so it always divides evenly
   }
-  const a = randInt(1,100), b = randInt(1,100);
-  return op === 'add'
-    ? { op, a, b, answer:a + b }
-    : { op, a, b, answer:a - b };
+
+  let a = pick(s.a), b = pick(s.b);
+  if(op === 'add') return { op, a, b, answer:a + b };
+
+  // Subtraction with negatives switched off: draw again for a pair that
+  // lands at or above zero, and if the two ranges make that unlikely
+  // (say 1–5 minus 10–20), give the larger number the front seat rather
+  // than hand a child the thing they were spared from.
+  if(!s.negatives && a < b){
+    for(let i = 0; i < 12 && a < b; i++){ a = pick(s.a); b = pick(s.b); }
+    if(a < b){ const t = a; a = b; b = t; }
+  }
+  return { op, a, b, answer:a - b };
+}
+
+// The line under each operation on the menu, and in the crew editor.
+function rangeText(s, op){
+  const r = f => f.min === f.max ? String(f.min) : f.min + '–' + f.max;
+  if(op === 'mul') return r(s.mul.a) + ' × ' + r(s.mul.b);
+  if(op === 'div') return 'up to ' + (s.div.quotient.max * s.div.divisor.max) +
+                          ' ÷ ' + r(s.div.divisor) + ', no remainder';
+  if(op === 'add') return r(s.add.a) + ' + ' + r(s.add.b);
+  return r(s.sub.a) + ' − ' + r(s.sub.b) + (s.sub.negatives ? ', can go negative' : ', never negative');
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -951,15 +1077,26 @@ function renderMenu(){
   $('menuBest').textContent = SAVE.best;
   $('menuRuns').textContent = SAVE.runs;
   $('menuFar').textContent  = SAVE.furthest;
+
+  const live = activeOps();
   document.querySelectorAll('.op').forEach(el => {
-    const on = SAVE.ops[el.dataset.op];
+    const key     = el.dataset.op;
+    const allowed = SETTINGS[key].on;
+    const on      = live.includes(key);
     el.classList.toggle('on', on);
+    el.classList.toggle('locked', !allowed);
     el.querySelector('input').checked = on;
+    el.querySelector('.rng').textContent = allowed
+      ? rangeText(SETTINGS, key)
+      : 'Not in your practice set';
   });
-  const n = Object.values(SAVE.ops).filter(Boolean).length;
-  $('opWarn').textContent = n === 1
-    ? 'Practising one operation only.'
-    : n + ' operations mixed together.';
+
+  const n = live.length;
+  const off = Object.keys(OPS).filter(k => !SETTINGS[k].on).length;
+  $('opWarn').textContent =
+    (n === 1 ? 'Practising one operation only.' : n + ' operations mixed together.') +
+    (off ? '  Your ranges are set by a parent.' : '');
+  $('negLine').classList.toggle('hidden', !(SETTINGS.sub.on && SETTINGS.sub.negatives));
   $('btnMute').textContent = SAVE.muted ? '🔇' : '🔊';
 }
 
@@ -967,15 +1104,205 @@ document.querySelectorAll('.op').forEach(el => {
   el.addEventListener('click', e => {
     e.preventDefault();
     const key = el.dataset.op;
+    if(!SETTINGS[key].on) return;                  // a parent switched this off
     const next = !SAVE.ops[key];
-    // Never let the last operation be switched off — there would be
-    // nothing to ask.
-    if(!next && Object.values(SAVE.ops).filter(Boolean).length === 1) return;
+    // Never let the last available operation be switched off — there
+    // would be nothing to ask.
+    if(!next && activeOps().length === 1) return;
     SAVE.ops[key] = next;
     renderMenu();
     persist();
   });
 });
+
+/* ══════════════════════════════════════════════════════════════
+   Crew practice ranges — the parent's panel
+
+   One tab per person, the parent first. Editing writes the whole
+   set back for that learner; the Worker clamps it and stores it.
+   Editing your own row also re-aims the game you are about to play,
+   which is the point of being able to play it at all — you set a
+   child's ranges, switch to your own tab, match them, and see for
+   yourself what they are about to be handed.
+══════════════════════════════════════════════════════════════ */
+let CREW = [];                    // [{ id, name, settings, updated_at }]
+let crewAt = 0;                   // index of the tab on screen
+const crewTimers = new Map();     // one debounce per learner, not one overall
+
+const isSelf = m => ME && m.id === ME.id;
+
+function renderCrewTabs(){
+  $('crewTabs').innerHTML = CREW.map((m, i) =>
+    '<button class="crewtab' + (i === crewAt ? ' on' : '') + '" data-i="' + i + '">' +
+    esc(m.name) + '</button>').join('');
+  $('crewTabs').querySelectorAll('.crewtab').forEach(b => {
+    b.addEventListener('click', () => { crewAt = +b.dataset.i; renderCrew(); });
+  });
+}
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderCrew(){
+  renderCrewTabs();
+  const m = CREW[crewAt];
+  if(!m){ $('crewEditor').innerHTML = ''; return; }
+  const s = m.settings;
+
+  $('crewEditor').innerHTML = Object.keys(OPS).map(op => {
+    const set = s[op];
+    const fields = Object.entries(OPS[op]).map(([name, spec]) =>
+      '<label class="rngfield"><span class="lbl">' + spec.label + '</span>' +
+      '<span>' +
+        numInput(op, name, 'min', set[name].min, spec) +
+        ' <em>to</em> ' +
+        numInput(op, name, 'max', set[name].max, spec) +
+      '</span></label>').join('');
+
+    const note = op === 'sub'
+      ? '<p class="opnote"><label><input type="checkbox" data-op="sub" data-neg' +
+        (set.negatives ? ' checked' : '') +
+        ' /> Allow answers below zero (7 − 9 = −2)</label></p>'
+      : op === 'div'
+        ? '<p class="opnote">The problem is built from the answer, so it always divides evenly.</p>'
+        : '';
+
+    return '<div class="opset' + (set.on ? '' : ' off') + '" data-op="' + op + '">' +
+      '<div class="opset-head">' +
+        '<button class="' + (set.on ? '' : 'ghost') + '" data-op="' + op + '" data-toggle>' +
+          (set.on ? 'On' : 'Off') + '</button>' +
+        '<span class="opsym">' + OP_SYM[op] + '</span>' +
+        '<span class="opname">' + OP_NAME[op] + '</span>' +
+        '<span class="opeg">' + esc(rangeText(s, op)) + '</span>' +
+      '</div>' +
+      '<div class="opset-grid">' + fields + '</div>' + note +
+    '</div>';
+  }).join('');
+
+  wireCrewEditor();
+  $('crewSave').className = '';
+  $('crewSave').textContent = m.updated_at
+    ? 'Last changed ' + new Date(m.updated_at).toLocaleDateString()
+    : (isSelf(m) ? 'Your own practice set' : 'Using the defaults');
+}
+
+function numInput(op, name, key, value, spec){
+  return '<input type="number" inputmode="numeric" data-op="' + op + '" data-f="' + name +
+    '" data-k="' + key + '" value="' + value + '" min="' + spec.lo + '" max="' + spec.hi +
+    '" aria-label="' + spec.label + ' ' + key + '" />';
+}
+
+function wireCrewEditor(){
+  const ed = $('crewEditor');
+
+  ed.querySelectorAll('button[data-toggle]').forEach(b => {
+    b.addEventListener('click', () => {
+      const set = CREW[crewAt].settings;
+      const op  = b.dataset.op;
+      // Something has to be askable.
+      if(set[op].on && Object.values(set).filter(x => x.on).length === 1) return;
+      set[op].on = !set[op].on;
+      renderCrew();
+      saveCrew();
+    });
+  });
+
+  ed.querySelectorAll('input[data-neg]').forEach(c => {
+    c.addEventListener('change', () => {
+      CREW[crewAt].settings.sub.negatives = c.checked;
+      refreshCrewLabels();
+      saveCrew();
+    });
+  });
+
+  ed.querySelectorAll('input[type=number]').forEach(inp => {
+    const spec = OPS[inp.dataset.op][inp.dataset.f];
+    const read = () => {
+      const n = Math.round(Number(inp.value));
+      return Number.isFinite(n) ? clamp(n, spec.lo, spec.hi) : spec.def[0];
+    };
+    // While typing, take the number but leave the field alone — a half-typed
+    // "1" on the way to "12" should not be corrected out from under them.
+    inp.addEventListener('input', () => {
+      CREW[crewAt].settings[inp.dataset.op][inp.dataset.f][inp.dataset.k] = read();
+      refreshCrewLabels();
+      saveCrew();
+    });
+    // On the way out, show what was actually stored, backwards ranges included.
+    inp.addEventListener('change', () => {
+      const f = CREW[crewAt].settings[inp.dataset.op][inp.dataset.f];
+      f[inp.dataset.k] = read();
+      if(f.min > f.max){ const t = f.min; f.min = f.max; f.max = t; }
+      ed.querySelectorAll('input[data-op="' + inp.dataset.op + '"][data-f="' + inp.dataset.f + '"]')
+        .forEach(o => { o.value = f[o.dataset.k]; });
+      refreshCrewLabels();
+      saveCrew();
+    });
+  });
+}
+
+// Cheap enough to run on every keystroke, and it keeps the summary on
+// each row honest while the numbers are still moving.
+function refreshCrewLabels(){
+  const s = CREW[crewAt].settings;
+  $('crewEditor').querySelectorAll('.opset').forEach(box => {
+    const eg = box.querySelector('.opeg');
+    if(eg) eg.textContent = rangeText(s, box.dataset.op);
+  });
+}
+
+// Debounced per learner. One timer for the whole panel would mean a
+// change to Evan, then a click on Claire's tab a moment later, quietly
+// throwing Evan's change away.
+function saveCrew(){
+  const m = CREW[crewAt];
+  $('crewSave').className = '';
+  $('crewSave').textContent = 'Saving…';
+  clearTimeout(crewTimers.get(m.id));
+  crewTimers.set(m.id, setTimeout(async () => {
+    crewTimers.delete(m.id);
+    const r = await api('PUT', '/math/settings/' + m.id, { settings:m.settings });
+    if(r.error){
+      $('crewSave').className = 'bad';
+      $('crewSave').textContent = r.error;
+      return;
+    }
+    // The Worker is the authority on what a range may be, so take back
+    // what it stored rather than trusting what we sent.
+    m.settings = r.settings;
+    m.updated_at = new Date().toISOString();
+    $('crewSave').className = 'ok';
+    $('crewSave').textContent = 'Saved for ' + m.name;
+    if(isSelf(m)){ SETTINGS = r.settings; renderMenu(); }
+  }, 600));
+}
+
+$('btnCrewReset').addEventListener('click', () => {
+  const m = CREW[crewAt];
+  if(!m) return;
+  m.settings = defaultSettings();
+  renderCrew();
+  saveCrew();
+});
+
+async function loadSettings(){
+  const r = await api('GET', '/math/settings');
+  if(r.error || !r.settings) return;          // no settings is not a reason to block a run
+  SETTINGS = r.settings;
+
+  if(!r.is_parent) return;
+  CREW = [{ id:ME.id, name:'You', settings:r.settings, updated_at:null }].concat(
+    (r.students || []).map(st => ({
+      id:         st.id,
+      name:       st.display_name || st.email,
+      settings:   st.settings,
+      updated_at: st.updated_at,
+    })));
+  $('crewPanel').classList.remove('hidden');
+  renderCrew();
+}
 
 $('btnStart').addEventListener('click', startRun);
 $('btnAgain').addEventListener('click', startRun);
@@ -1005,7 +1332,7 @@ async function boot(){
   ME = me.user;
   $('userChipName').textContent = ME.display_name || ME.email;
 
-  await loadSave();
+  await Promise.all([loadSave(), loadSettings()]);
   renderMenu();
 
   $('authGate').style.display = 'none';
