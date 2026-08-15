@@ -25,9 +25,9 @@
 -- normalizeMathSettings first.
 --
 -- Only a parent writes this table, and only for someone in their own
--- family. A learner reads their own row and cannot change it; what
--- they still choose for themselves is which of the operations left
--- switched on they want to drill today.
+-- family. A learner reads their own row and cannot change any of it —
+-- not the ranges, and not which operations they are asked. A child who
+-- can pick their own drill picks the one they are already good at.
 CREATE TABLE IF NOT EXISTS math_fact_settings (
   user_id    uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   settings   jsonb NOT NULL DEFAULT '{}'::jsonb,

@@ -82,21 +82,15 @@
   .panelbox h3{ margin:0 0 12px; font-family:var(--font-mono); font-size:.68rem; letter-spacing:.22em;
     text-transform:uppercase; color:var(--muted); font-weight:700; }
 
+  /* A statement of what is being practised, not a control — the choice
+     lives on the parent's panel. */
   .ops{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
-  .op{ display:flex; align-items:center; gap:10px; padding:11px 13px; cursor:pointer;
-    border:1px solid var(--line); border-radius:var(--r); background:rgba(10,17,32,.6);
-    transition:border-color .15s, background .15s; user-select:none; }
-  .op:hover{ border-color:var(--line-mid); }
-  .op.on{ border-color:var(--line-hot); background:rgba(167,139,250,.12); }
-  .op .sym{ font-size:1.4rem; font-weight:800; color:var(--muted); width:26px; text-align:center; }
-  .op.on .sym{ color:var(--violet); }
+  .op{ display:flex; align-items:center; gap:10px; padding:11px 13px;
+    border:1px solid var(--line-hot); border-radius:var(--r);
+    background:rgba(167,139,250,.12); user-select:none; }
+  .op .sym{ font-size:1.4rem; font-weight:800; color:var(--violet); width:26px; text-align:center; }
   .op .nm{ font-size:.88rem; font-weight:600; }
   .op .rng{ display:block; font-size:.68rem; color:var(--muted); font-weight:400; margin-top:2px; }
-  .op input{ display:none; }
-  /* Switched off by a parent — visible, so the child can see what they
-     are not being asked, but not something they can switch back on. */
-  .op.locked{ opacity:.42; cursor:not-allowed; }
-  .op.locked:hover{ border-color:var(--line); }
 
   /* ── Crew practice ranges (parents only) ─────────────────────── */
   .crewtabs{ display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
@@ -271,15 +265,17 @@
 
     <div class="panelbox">
       <h3>Practice set</h3>
+      <!-- Read-only. What is practised, and the numbers it draws from,
+           are set per learner on the parent's panel. -->
       <div class="ops">
-        <label class="op" data-op="mul"><input type="checkbox" checked /><span class="sym">×</span>
-          <span class="nm">Multiplication<span class="rng"></span></span></label>
-        <label class="op" data-op="div"><input type="checkbox" checked /><span class="sym">÷</span>
-          <span class="nm">Division<span class="rng"></span></span></label>
-        <label class="op" data-op="add"><input type="checkbox" checked /><span class="sym">+</span>
-          <span class="nm">Addition<span class="rng"></span></span></label>
-        <label class="op" data-op="sub"><input type="checkbox" checked /><span class="sym">−</span>
-          <span class="nm">Subtraction<span class="rng"></span></span></label>
+        <div class="op" data-op="mul"><span class="sym">×</span>
+          <span class="nm">Multiplication<span class="rng"></span></span></div>
+        <div class="op" data-op="div"><span class="sym">÷</span>
+          <span class="nm">Division<span class="rng"></span></span></div>
+        <div class="op" data-op="add"><span class="sym">+</span>
+          <span class="nm">Addition<span class="rng"></span></span></div>
+        <div class="op" data-op="sub"><span class="sym">−</span>
+          <span class="nm">Subtraction<span class="rng"></span></span></div>
       </div>
       <p class="tiny muted" id="opWarn" style="margin:10px 0 0">&nbsp;</p>
     </div>
@@ -289,9 +285,9 @@
     <div class="panelbox hidden" id="crewPanel">
       <h3>Practice ranges for your crew</h3>
       <p class="tiny muted" style="margin:-4px 0 14px">
-        Pick a runner, then set the numbers each operation draws from. Saved to their
-        account — they get the new ranges the next time they play. Anything you switch
-        off here they cannot switch back on.
+        Pick a runner, then choose which operations they practise and the numbers each
+        one draws from. This is the whole of what they get asked — they have no say in
+        it. Saved to their account, and live the next time they play.
       </p>
       <div class="crewtabs" id="crewTabs"></div>
       <div id="crewEditor"></div>
@@ -402,11 +398,10 @@ const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
 const randInt = (a,b) => a + Math.floor(Math.random() * (b - a + 1));
 
 /* ══════════════════════════════════════════════════════════════
-   Saved state — best score, lifetime counters, chosen operations
+   Saved state — best score, lifetime counters, mute
 ══════════════════════════════════════════════════════════════ */
 const SAVE = {
   best:0, runs:0, furthest:0,
-  ops:{ mul:true, div:true, add:true, sub:true },
   muted:false
 };
 let saveTimer = null;
@@ -417,10 +412,9 @@ async function loadSave(){
   SAVE.best     = s.best     | 0;
   SAVE.runs     = s.runs     | 0;
   SAVE.furthest = s.furthest | 0;
-  if(s.ops && typeof s.ops === 'object'){
-    for(const k of Object.keys(SAVE.ops)) SAVE.ops[k] = s.ops[k] !== false;
-    if(!Object.values(SAVE.ops).some(Boolean)) SAVE.ops.mul = true;
-  }
+  // s.ops is deliberately ignored and no longer written. Which operations
+  // a learner practises moved to math_fact_settings, where a parent sets
+  // it; older rows still carry the field and it means nothing now.
   SAVE.muted = !!s.muted;
 }
 function persist(){
@@ -526,17 +520,18 @@ function defaultSettings(){
   return out;
 }
 
-// The set the person at the keyboard is practising.
-let SETTINGS = defaultSettings();
+// The set the person at the keyboard is practising, and whether they
+// are the one who gets to change it.
+let SETTINGS  = defaultSettings();
+let IS_PARENT = false;
 
 const pick = r => randInt(r.min, r.max);
 
-// A parent can switch an operation off; inside what is left, the
-// runner still picks what to drill today.
+// Everything a parent left switched on, and nothing else. The runner
+// does not choose: a child who can pick their own drill picks the one
+// they are already good at.
 function activeOps(){
-  const allowed = Object.keys(OPS).filter(k => SETTINGS[k].on);
-  const chosen  = allowed.filter(k => SAVE.ops[k]);
-  return chosen.length ? chosen : allowed;
+  return Object.keys(OPS).filter(k => SETTINGS[k].on);
 }
 
 function makeProblem(){
@@ -1078,42 +1073,26 @@ function renderMenu(){
   $('menuRuns').textContent = SAVE.runs;
   $('menuFar').textContent  = SAVE.furthest;
 
+  // Only what they are actually being asked. An operation nobody has
+  // assigned them is not a locked door to rattle, it is just absent.
   const live = activeOps();
   document.querySelectorAll('.op').forEach(el => {
-    const key     = el.dataset.op;
-    const allowed = SETTINGS[key].on;
-    const on      = live.includes(key);
-    el.classList.toggle('on', on);
-    el.classList.toggle('locked', !allowed);
-    el.querySelector('input').checked = on;
-    el.querySelector('.rng').textContent = allowed
-      ? rangeText(SETTINGS, key)
-      : 'Not in your practice set';
+    const key = el.dataset.op;
+    el.classList.toggle('hidden', !SETTINGS[key].on);
+    if(SETTINGS[key].on) el.querySelector('.rng').textContent = rangeText(SETTINGS, key);
   });
 
-  const n = live.length;
-  const off = Object.keys(OPS).filter(k => !SETTINGS[k].on).length;
-  $('opWarn').textContent =
-    (n === 1 ? 'Practising one operation only.' : n + ' operations mixed together.') +
-    (off ? '  Your ranges are set by a parent.' : '');
+  const names = live.map(k => OP_NAME[k].toLowerCase());
+  const listed = names.length === 1
+    ? names[0]
+    : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  $('opWarn').textContent = IS_PARENT
+    ? 'Your own set: ' + listed + '. Change it on the You tab below.'
+    : 'Your set: ' + listed + '. A parent chooses this for you.';
+
   $('negLine').classList.toggle('hidden', !(SETTINGS.sub.on && SETTINGS.sub.negatives));
   $('btnMute').textContent = SAVE.muted ? '🔇' : '🔊';
 }
-
-document.querySelectorAll('.op').forEach(el => {
-  el.addEventListener('click', e => {
-    e.preventDefault();
-    const key = el.dataset.op;
-    if(!SETTINGS[key].on) return;                  // a parent switched this off
-    const next = !SAVE.ops[key];
-    // Never let the last available operation be switched off — there
-    // would be nothing to ask.
-    if(!next && activeOps().length === 1) return;
-    SAVE.ops[key] = next;
-    renderMenu();
-    persist();
-  });
-});
 
 /* ══════════════════════════════════════════════════════════════
    Crew practice ranges — the parent's panel
@@ -1290,9 +1269,10 @@ $('btnCrewReset').addEventListener('click', () => {
 async function loadSettings(){
   const r = await api('GET', '/math/settings');
   if(r.error || !r.settings) return;          // no settings is not a reason to block a run
-  SETTINGS = r.settings;
+  SETTINGS  = r.settings;
+  IS_PARENT = !!r.is_parent;
 
-  if(!r.is_parent) return;
+  if(!IS_PARENT) return;
   CREW = [{ id:ME.id, name:'You', settings:r.settings, updated_at:null }].concat(
     (r.students || []).map(st => ({
       id:         st.id,

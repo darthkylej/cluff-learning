@@ -233,8 +233,8 @@ answer and then **repeats until it is answered correctly**. The monster behind
 advances continuously and accelerates with both elapsed time and score, so a run
 always ends eventually — the score is how long you held it off.
 
-Problem sets, all selectable independently. These are the defaults, and what
-anyone with no ranges of their own gets:
+The four problem sets. These are the defaults, and what anyone with no ranges of
+their own gets:
 
 | Set | Range |
 | --- | --- |
@@ -243,13 +243,20 @@ anyone with no ranges of their own gets:
 | Addition | 1–100 + 1–100 |
 | Subtraction | 1–100 − 1–100, answers −99 to 99 |
 
-#### Practice ranges
+#### Practice sets, set per learner
 
 A parent opening Fact Runner gets a **crew panel** under the practice set: one
 tab per learner (and one for themselves), and per operation a switch plus the
 numbers it draws from. So one child can grind 1–8 × 1–8 while another does
 2–9 + 2–9 and nothing else — the point being that a child drilling the facts
 they already own is not practising.
+
+**The learner has no say in any of it**, neither the ranges nor which operations
+they are asked, because a child who can pick their own drill picks the one they
+are already good at. Their menu is a read-only statement of what they have been
+given: only the live operations appear, each with its ranges written under it,
+and an operation nobody assigned them is simply absent rather than a locked door
+to rattle.
 
 | Operation | What a parent sets | Limits |
 | --- | --- | --- |
@@ -269,11 +276,16 @@ written only by a parent and only for their own family. **The Worker owns the
 limits**: everything is normalised on the way in and again on the way out, so a
 stale row can't hand the game a range it cannot draw from.
 
-The learner still chooses which of the operations left switched on they want to
-drill today; an operation a parent switched off shows on their menu greyed out
-and cannot be switched back on. That choice, along with best score, run count,
-furthest distance and mute, stays in `tool_progress` under `math-facts` on the
-generic `/progress/:slug` pair.
+What stays in `tool_progress` under `math-facts`, on the generic
+`/progress/:slug` pair, is only what the run produced: best score, run count,
+furthest distance, mute. It used to hold the learner's own choice of operations
+in `ops`; that field is no longer read or written, and older rows still carrying
+it mean nothing.
+
+The Flight Deck reads the assignment, not that dead field — the roster line
+shows which operations a learner is set to practise and the module panel spells
+out the ranges, so a child restricted to multiplication doesn't go on being
+reported as doing all four.
 
 ### Spanish Coach
 

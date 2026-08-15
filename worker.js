@@ -555,8 +555,11 @@ async function handlePutProgress(request, env, slug) {
    ──────────────────────────────────────────────────────────────
    A parent decides which operations each child practises and the
    numbers each one draws from, so one child can grind the 1–8 times
-   tables while another adds inside 20. Absent row means the ranges
-   the game shipped with, so nobody has to be configured first.
+   tables while another adds inside 20. It is the whole of what that
+   child gets asked — the learner has no say in it, because a child
+   who can pick their own drill picks the one they are already good
+   at. Absent row means the ranges the game shipped with, so nobody
+   has to be configured before they can play.
 
    The Worker owns the limits. Whatever the browser sends goes
    through normalizeMathSettings before it is stored, and again on
@@ -602,6 +605,15 @@ function normalizeMathSettings(raw) {
 
   // Every operation switched off leaves nothing to ask.
   if (!Object.values(out).some(set => set.on)) out.mul.on = true;
+  return out;
+}
+
+// The Flight Deck only wants to know which operations are in play, so
+// it gets a plain { mul:true, div:false, … } map rather than the set.
+function mathOpsFlags(raw) {
+  const s = normalizeMathSettings(raw);
+  const out = {};
+  for (const op of Object.keys(MATH_OPS)) out[op] = s[op].on;
   return out;
 }
 
@@ -2816,7 +2828,7 @@ async function handleParentsOverview(request, env) {
   const idOnly = [];
   const inIdsAlone = idList(idOnly, ids);
 
-  const [timeR, bankR, spellR, mathR, essayR, assignedR, spanishR] = await Promise.all([
+  const [timeR, bankR, spellR, mathR, mathSetR, essayR, assignedR, spanishR] = await Promise.all([
     query(env, timeSql, p),
     query(env, `SELECT COUNT(*)::int AS n FROM spelling_words`),
     query(env, `
@@ -2833,6 +2845,10 @@ async function handleParentsOverview(request, env) {
       SELECT user_id, state, updated_at
         FROM tool_progress
        WHERE tool_slug = 'math-facts' AND user_id IN (${inIdsAlone})`, idOnly),
+    query(env, `
+      SELECT user_id, settings
+        FROM math_fact_settings
+       WHERE user_id IN (${inIdsAlone})`, idOnly),
     query(env, `
       SELECT user_id,
              COUNT(*)::int                                          AS started,
@@ -2867,6 +2883,7 @@ async function handleParentsOverview(request, env) {
     return m;
   };
   const spell = byUser(spellR.rows), math = byUser(mathR.rows);
+  const mathSet = byUser(mathSetR.rows);
   const essay = byUser(essayR.rows), assigned = byUser(assignedR.rows);
   const spanish = byUser(spanishR.rows);
 
@@ -2921,7 +2938,10 @@ async function handleParentsOverview(request, env) {
           best: Number(mathState.best || 0),
           runs: Number(mathState.runs || 0),
           furthest: Number(mathState.furthest || 0),
-          ops: mathState.ops || null,
+          // What they are set to practise, which is the parent's call —
+          // not the stale `ops` the game used to keep back when it was
+          // the child's.
+          ops: mathOpsFlags(mathSet.get(k)?.settings),
           last_at: math.get(k)?.updated_at || null,
         } : null,
         'essay-coach': {
@@ -3037,6 +3057,9 @@ async function handleParentsStudent(request, env, studentId) {
       weakest: weakR.rows || [],
     },
     math: mathR.rows?.[0] ? { state: mathR.rows[0].state, updated_at: mathR.rows[0].updated_at } : null,
+    // Always present, even for a learner who has never played — the set
+    // they have been given is worth seeing before there is a score.
+    math_settings: await getMathSettings(env, studentId),
     essays: essaysR.rows || [],
     spanish: {
       streak,

@@ -547,10 +547,26 @@ function progressLine(slug,p,visits){
   }
   return '';
 }
+// Which operations this learner has been set to practise. A parent
+// decides this on the Fact Runner panel; the child has no say, so it
+// reads as an assignment rather than a preference.
 function opsLabel(ops){
   const on=[]; if(ops.mul!==false) on.push('×'); if(ops.div!==false) on.push('÷');
   if(ops.add!==false) on.push('+'); if(ops.sub!==false) on.push('−');
   return on.join(' ');
+}
+
+// The ranges behind those symbols, spelled out. Mirrors rangeText in
+// games/fact-runner.html.
+function mathRangeLines(s){
+  if(!s) return [];
+  const r=f=>f.min===f.max?String(f.min):f.min+'–'+f.max;
+  const out=[];
+  if(s.mul&&s.mul.on) out.push(r(s.mul.a)+' × '+r(s.mul.b));
+  if(s.div&&s.div.on) out.push('up to '+(s.div.quotient.max*s.div.divisor.max)+' ÷ '+r(s.div.divisor));
+  if(s.add&&s.add.on) out.push(r(s.add.a)+' + '+r(s.add.b));
+  if(s.sub&&s.sub.on) out.push(r(s.sub.a)+' − '+r(s.sub.b)+(s.sub.negatives?'':', never negative'));
+  return out;
 }
 
 $('roster').addEventListener('click',e=>{
@@ -699,18 +715,26 @@ function spellingPanel(d){
 
 function mathPanel(d){
   const st=d.math&&d.math.state;
+  const set=d.math_settings;
+  // The assigned set stands on its own — worth seeing before there is a
+  // single run to report, since it is the thing a parent can act on.
+  const assigned=mathRangeLines(set);
+  const note=assigned.length
+    ? '<div class="note">Set to practise: '+esc(assigned.join(' · '))
+      +'. Change it on the Fact Runner page.</div>'
+    : '';
+
   if(!st||!Number(st.runs||0)){
     return '<div class="panel mpanel">'+panelHead('math-facts','not started')
-      +'<div class="note">No runs recorded yet.</div></div>';
+      +'<div class="note">No runs recorded yet.</div>'+note+'</div>';
   }
   return '<div class="panel mpanel">'+panelHead('math-facts','last played '+relTime(d.math.updated_at))
     +'<div class="stat-row">'
       +'<div class="stat"><div class="k">Best score</div><div class="v" style="color:var(--violet)">'+Number(st.best||0)+'</div></div>'
       +'<div class="stat"><div class="k">Runs</div><div class="v">'+Number(st.runs||0)+'</div></div>'
       +'<div class="stat"><div class="k">Furthest</div><div class="v">'+Number(st.furthest||0)+'</div></div>'
-    +'</div>'
-    +'<div class="note">Practising: '+esc(st.ops?opsLabel(st.ops):'all four operations')
-    +'. A run ends when the monster catches up, so the score is how long they held it off.</div>'
+    +'</div>'+note
+    +'<div class="note">A run ends when the monster catches up, so the score is how long they held it off.</div>'
     +'</div>';
 }
 
