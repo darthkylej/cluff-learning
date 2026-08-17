@@ -528,6 +528,75 @@ section + section{margin-top:3rem}
       <button id="backBtn" class="btn ghost block" style="margin-top:.6rem">Use a different address</button>
     </div>
 
+    <!-- step 3: unknown address — who are you? -->
+    <div id="step3" hidden>
+      <div class="auth-head">
+        <div class="label">Unregistered</div>
+        <h1>We don't know that address yet</h1>
+        <p><b id="unknownEcho"></b> isn't registered. Nobody can sign themselves up — which of these are you?</p>
+      </div>
+      <div id="err3" class="err" hidden></div>
+      <button id="chooseLeaderBtn" class="btn block">I'm a parent or teacher</button>
+      <button id="chooseStudentBtn" class="btn ghost block" style="margin-top:.6rem">I'm a student</button>
+      <button id="back3Btn" class="btn ghost block" style="margin-top:.6rem">Use a different address</button>
+    </div>
+
+    <!-- step 4: parent/teacher requests a family or class -->
+    <div id="step4" hidden>
+      <div class="auth-head">
+        <div class="label">Request access</div>
+        <h1>Start a family or class</h1>
+        <p>Requests are reviewed by hand. You'll get an email either way, usually within a day.</p>
+      </div>
+      <div id="err4" class="err" hidden></div>
+      <div class="field">
+        <span class="label">What are you setting up?</span>
+        <div class="seg">
+          <input type="radio" name="reqkind" id="kindFamily" value="family" checked>
+          <label for="kindFamily">A family</label>
+          <input type="radio" name="reqkind" id="kindClass" value="class">
+          <label for="kindClass">A class</label>
+        </div>
+      </div>
+      <label class="field">
+        <span class="label">Your name</span>
+        <input id="reqName" class="input" type="text" placeholder="Kyle Cluff" maxlength="60">
+      </label>
+      <label class="field">
+        <span class="label" id="reqGroupLabel">Family name</span>
+        <input id="reqGroup" class="input" type="text" placeholder="Cluff Family" maxlength="80">
+      </label>
+      <label class="field">
+        <span class="label">Anything we should know? <span style="opacity:.6">(optional)</span></span>
+        <input id="reqNote" class="input" type="text" placeholder="4 kids, ages 7–14" maxlength="300">
+      </label>
+      <button id="submitReqBtn" class="btn block">Send request</button>
+      <button id="back4Btn" class="btn ghost block" style="margin-top:.6rem">Back</button>
+    </div>
+
+    <!-- step 5: student — go ask your parent or teacher -->
+    <div id="stepStudent" hidden>
+      <div class="auth-head">
+        <div class="label">Ask first</div>
+        <h1>Your teacher or parent adds you</h1>
+        <p>Students don't sign themselves up. Ask your teacher or parent to add
+           <b id="studentEcho"></b> to their class or family — then come back and
+           this address will work.</p>
+      </div>
+      <button id="back5Btn" class="btn ghost block">Back to sign in</button>
+    </div>
+
+    <!-- step 6: request filed / already pending -->
+    <div id="stepSent" hidden>
+      <div class="auth-head">
+        <div class="label">Received</div>
+        <h1 id="sentTitle">Request sent</h1>
+        <p id="sentBody">We'll review it and email <b id="sentEcho"></b> with the decision.
+           Once it's approved, sign in with that address and you can add everyone else.</p>
+      </div>
+      <button id="back6Btn" class="btn ghost block">Back to sign in</button>
+    </div>
+
     <div class="auth-foot">
       <div class="diag">
         <span><i class="led"></i> Link</span>
@@ -591,11 +660,21 @@ section + section{margin-top:3rem}
 
     <section id="crewSection" hidden>
       <div class="sec-head">
-        <h2>Crew Roster</h2>
+        <h2 id="crewHeading">Crew Roster</h2>
         <div class="rule"></div>
         <button id="addMemberBtn" class="btn ghost sm">+ Add member</button>
       </div>
       <div class="crew-list" id="crewList"></div>
+    </section>
+
+    <!-- Admin only: the gate every new family and class comes through. -->
+    <section id="requestsSection" hidden>
+      <div class="sec-head">
+        <h2>Access Requests</h2>
+        <div class="rule"></div>
+        <div class="count" id="requestCount">—</div>
+      </div>
+      <div class="crew-list" id="requestList"></div>
     </section>
   </main>
 
@@ -613,14 +692,23 @@ section + section{margin-top:3rem}
   <div class="panel">
     <div class="label">Registry</div>
     <h2>Establish your family</h2>
-    <p class="sub">You're not assigned to a family yet. Create one and you'll be its parent — then you can add each learner by email.</p>
+    <p class="sub">You're not assigned to one yet. Create it and you'll be its parent or teacher — then you can add everyone else by email.</p>
     <div id="errFamily" class="err" hidden></div>
+    <div class="field">
+      <span class="label">Kind</span>
+      <div class="seg">
+        <input type="radio" name="fkind" id="fkindFamily" value="family" checked>
+        <label for="fkindFamily">Family</label>
+        <input type="radio" name="fkind" id="fkindClass" value="class">
+        <label for="fkindClass">Class</label>
+      </div>
+    </div>
     <label class="field">
-      <span class="label">Family name</span>
+      <span class="label">Name</span>
       <input id="familyName" class="input" type="text" placeholder="Cluff Family" maxlength="80">
     </label>
     <div class="modal-actions">
-      <button id="createFamilyBtn" class="btn">Create family</button>
+      <button id="createFamilyBtn" class="btn">Create</button>
     </div>
   </div>
 </div>
@@ -629,7 +717,7 @@ section + section{margin-top:3rem}
   <div class="panel">
     <div class="label">Registry</div>
     <h2>Add crew member</h2>
-    <p class="sub">They'll be able to sign in with this address once you add them. Nobody can register on their own.</p>
+    <p class="sub" id="memberSub">They'll be able to sign in with this address once you add them. Nobody can register on their own.</p>
     <div id="errMember" class="err" hidden></div>
     <label class="field">
       <span class="label">Name</span>
@@ -643,9 +731,9 @@ section + section{margin-top:3rem}
       <span class="label">Role</span>
       <div class="seg">
         <input type="radio" name="mrole" id="roleLearner" value="learner" checked>
-        <label for="roleLearner">Learner</label>
+        <label for="roleLearner" id="roleLearnerLabel">Learner</label>
         <input type="radio" name="mrole" id="roleParent" value="parent">
-        <label for="roleParent">Parent</label>
+        <label for="roleParent" id="roleParentLabel">Parent</label>
       </div>
     </div>
     <div class="modal-actions">
@@ -698,7 +786,11 @@ async function api(method, path, body = null) {
     let data = {};
     try { data = text ? JSON.parse(text) : {}; }
     catch { data = { error: text || `HTTP ${res.status}` }; }
-    if (!res.ok) return { error: data.error || `HTTP ${res.status}`, status: res.status };
+    // Spread the body through even on a failure — an error can carry
+    // structure worth acting on (`code: 'not_registered'` is what turns
+    // a refused sign-in into the request flow), and flattening it to a
+    // bare string throws that away.
+    if (!res.ok) return { ...data, error: data.error || `HTTP ${res.status}`, status: res.status };
     return data;
   } catch (e) {
     return { error: 'Unable to reach the server. Check your connection.' };
@@ -745,6 +837,22 @@ function rankFor(user) {
   if (!user?.family) return 'Unassigned';
   return user.role === 'parent' ? 'Commander' : 'Cadet';
 }
+
+/* A class and a family are the same tenant with the same roles — the
+   only difference is the words. Starship flavour (Commander, Cadet,
+   Crew Roster) is the product's voice and stays put; everything that
+   has to read as plain English comes from here. */
+const LEX_FAMILY = {
+  group: 'family', Group: 'Family', groupOf: 'your family',
+  leader: 'parent', Leader: 'Parent', member: 'learner', Member: 'Learner',
+  members: 'learners', roster: 'Crew Roster',
+};
+const LEX_CLASS = {
+  group: 'class', Group: 'Class', groupOf: 'your class',
+  leader: 'teacher', Leader: 'Teacher', member: 'student', Member: 'Student',
+  members: 'students', roster: 'Class Roster',
+};
+const lex = () => (AUTH.user?.family?.kind === 'class' ? LEX_CLASS : LEX_FAMILY);
 
 function relTime(iso) {
   if (!iso) return 'never';
@@ -829,9 +937,15 @@ async function boot() {
   await showApp();
 }
 
+const AUTH_STEPS = ['step1', 'step2', 'step3', 'step4', 'stepStudent', 'stepSent'];
+function authStep(id) {
+  for (const s of AUTH_STEPS) $(s).hidden = s !== id;
+}
+
 function showAuth() {
   $('app').hidden = true;
   $('authScreen').hidden = false;
+  authStep('step1');
   $('loginEmail').focus();
 }
 
@@ -849,26 +963,30 @@ async function showApp() {
     promptFamilyIfNeeded();
   }
 
-  await Promise.all([loadTools(), loadCrew()]);
+  await Promise.all([loadTools(), loadCrew(), loadRequests()]);
 }
 
+// Only an admin can conjure a tenant out of nothing. Everyone else
+// arrives already in one, because approval is what created it.
 function promptFamilyIfNeeded() {
-  if (AUTH.user.family) return;
+  if (AUTH.user.family || !AUTH.user.is_admin) return;
   openModal('familyModal');
   $('familyName').focus();
 }
 
 function renderIdentity() {
   const u = AUTH.user;
+  const L = lex();
   $('userName').textContent  = u.display_name || u.email;
   $('userRank').textContent  = rankFor(u);
   $('userAvatar').textContent = (u.display_name || u.email || '?').trim()[0].toUpperCase();
   $('heroName').textContent  = firstName(u) || 'Cadet';
   $('stardate').textContent  = stardate();
   $('familyStatus').textContent = u.family ? u.family.name : 'Unassigned';
+  $('crewHeading').textContent  = L.roster;
   $('heroSub').textContent = u.family
     ? 'All systems nominal. Select a module below to begin your session.'
-    : 'Standing by — you need to be assigned to a family before modules unlock.';
+    : 'Standing by — a parent or teacher needs to add you before modules unlock.';
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -887,14 +1005,98 @@ async function sendCode() {
   const r = await api('POST', '/auth/send-otp', { email });
   btn.disabled = false; btn.textContent = 'Request access code';
 
+  // An address nobody has added isn't a failure, it's a fork: either
+  // this person leads a family/class and should ask for one, or they're
+  // a student and someone else has to add them.
+  if (r.code === 'not_registered') {
+    if (r.request_status === 'pending') {
+      $('sentTitle').textContent = 'Still under review';
+      $('sentEcho').textContent  = email;
+      $('sentBody').innerHTML = `Your request hasn't been reviewed yet. We'll email
+        <b>${esc(email)}</b> as soon as it is.`;
+      authStep('stepSent');
+      return;
+    }
+    $('unknownEcho').textContent = email;
+    $('studentEcho').textContent = email;
+    // A denial isn't permanent — the unique index only blocks a second
+    // OPEN request — so say why and leave the fork available.
+    showErr('err3', r.request_status === 'denied' ? r.error : '');
+    authStep('step3');
+    return;
+  }
+
   if (r.error) { showErr('err1', r.error); return; }
 
   $('emailEcho').textContent = email;
-  $('step1').hidden = true;
-  $('step2').hidden = false;
+  authStep('step2');
   clearCode();
   cells()[0].focus();
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Access requests (the only self-serve door)
+══════════════════════════════════════════════════════════════ */
+const reqKind = () => document.querySelector('input[name=reqkind]:checked').value;
+
+function syncReqKind() {
+  const isClass = reqKind() === 'class';
+  $('reqGroupLabel').textContent = isClass ? 'Class name' : 'Family name';
+  $('reqGroup').placeholder = isClass ? 'Room 12 — 4th Grade' : 'Cluff Family';
+  $('reqNote').placeholder  = isClass ? '22 students, 4th grade' : '4 kids, ages 7–14';
+}
+[...document.querySelectorAll('input[name=reqkind]')]
+  .forEach(el => el.addEventListener('change', syncReqKind));
+
+$('chooseLeaderBtn').addEventListener('click', () => {
+  showErr('err4', '');
+  $('reqName').value = '';
+  $('reqGroup').value = '';
+  $('reqNote').value = '';
+  $('kindFamily').checked = true;
+  syncReqKind();
+  authStep('step4');
+  $('reqName').focus();
+});
+$('chooseStudentBtn').addEventListener('click', () => authStep('stepStudent'));
+$('back3Btn').addEventListener('click', backToSignIn);
+$('back4Btn').addEventListener('click', () => authStep('step3'));
+$('back5Btn').addEventListener('click', backToSignIn);
+$('back6Btn').addEventListener('click', backToSignIn);
+
+function backToSignIn() {
+  showErr('err1', ''); showErr('err2', ''); showErr('err3', ''); showErr('err4', '');
+  clearCode();
+  authStep('step1');
+  $('loginEmail').focus();
+}
+
+$('submitReqBtn').addEventListener('click', async () => {
+  const kind  = reqKind();
+  const email = $('loginEmail').value.trim().toLowerCase();
+  const name  = $('reqName').value.trim();
+  const group = $('reqGroup').value.trim();
+  showErr('err4', '');
+  if (!name)  { showErr('err4', 'Please enter your name.'); return; }
+  if (!group) { showErr('err4', `Please name your ${kind}.`); return; }
+
+  const btn = $('submitReqBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const r = await api('POST', '/access-requests', {
+    email, requester_name: name, group_name: group, kind, note: $('reqNote').value.trim(),
+  });
+  btn.disabled = false; btn.textContent = 'Send request';
+
+  if (r.error) { showErr('err4', r.error); return; }
+
+  $('sentTitle').textContent = r.already_pending ? 'Already received' : 'Request sent';
+  $('sentEcho').textContent  = email;
+  $('sentBody').innerHTML = `We'll review it and email <b>${esc(email)}</b> with the decision.
+    Once it's approved, sign in with that address and you can add everyone else.`;
+  authStep('stepSent');
+});
+$('reqGroup').addEventListener('keydown', e => { if (e.key === 'Enter') $('submitReqBtn').click(); });
+$('reqNote').addEventListener('keydown',  e => { if (e.key === 'Enter') $('submitReqBtn').click(); });
 
 const cells = () => [...$('codeRow').querySelectorAll('.code-cell')];
 const codeValue = () => cells().map(c => c.value).join('');
@@ -957,13 +1159,7 @@ async function verifyCode() {
 }
 
 $('verifyBtn').addEventListener('click', verifyCode);
-$('backBtn').addEventListener('click', () => {
-  $('step2').hidden = true;
-  $('step1').hidden = false;
-  showErr('err1', ''); showErr('err2', '');
-  clearCode();
-  $('loginEmail').focus();
-});
+$('backBtn').addEventListener('click', backToSignIn);
 
 $('logoutBtn').addEventListener('click', async () => {
   await api('POST', '/auth/logout');
@@ -1074,6 +1270,7 @@ async function loadCrew() {
 
   section.hidden = false;
   const isParent = AUTH.user.role === 'parent';
+  const L = lex();
   $('addMemberBtn').hidden = !isParent;
 
   const members = r.family.members || [];
@@ -1092,7 +1289,8 @@ async function loadCrew() {
           <div class="em">${esc(m.email)}</div>
         </div>
         ${levelPicker}
-        <span class="crew-role ${m.role === 'parent' ? '' : 'learner'}">${m.role === 'parent' ? 'Commander' : 'Cadet'}</span>
+        <span class="crew-role ${m.role === 'parent' ? '' : 'learner'}"
+              title="${m.role === 'parent' ? L.Leader : L.Member}">${m.role === 'parent' ? 'Commander' : 'Cadet'}</span>
         <span class="crew-seen">${esc(relTime(m.last_login_at))}</span>
         ${canRemove ? `<button class="btn danger sm" data-remove="${esc(m.email)}">Remove</button>` : ''}
       </div>`;
@@ -1132,9 +1330,10 @@ $('crewList').addEventListener('click', async e => {
 
 $('createFamilyBtn').addEventListener('click', async () => {
   const name = $('familyName').value.trim();
+  const kind = document.querySelector('input[name=fkind]:checked').value;
   showErr('errFamily', '');
-  if (!name) { showErr('errFamily', 'Please enter a family name.'); return; }
-  const r = await api('POST', '/family/create', { name });
+  if (!name) { showErr('errFamily', 'Please enter a name.'); return; }
+  const r = await api('POST', '/family/create', { name, kind });
   if (r.error) { showErr('errFamily', r.error); return; }
 
   const me = await api('GET', '/auth/me');
@@ -1147,9 +1346,14 @@ $('createFamilyBtn').addEventListener('click', async () => {
 $('familyName').addEventListener('keydown', e => { if (e.key === 'Enter') $('createFamilyBtn').click(); });
 
 $('addMemberBtn').addEventListener('click', () => {
+  const L = lex();
   $('memberName').value = '';
   $('memberEmail').value = '';
   $('roleLearner').checked = true;
+  $('roleLearnerLabel').textContent = L.Member;
+  $('roleParentLabel').textContent  = L.Leader;
+  $('memberSub').textContent =
+    `They'll be able to sign in with this address once you add them to ${L.groupOf}. Nobody can register on their own.`;
   showErr('errMember', '');
   openModal('memberModal');
   $('memberName').focus();
@@ -1168,6 +1372,72 @@ $('saveMemberBtn').addEventListener('click', async () => {
   closeModal('memberModal');
   toast(`${display_name || email} added to the crew.`);
   await loadCrew();
+});
+
+/* ══════════════════════════════════════════════════════════════
+   Access requests — admin review
+   The only place a new family or class comes into existence.
+══════════════════════════════════════════════════════════════ */
+async function loadRequests() {
+  const section = $('requestsSection');
+  if (!AUTH.user.is_admin) { section.hidden = true; return; }
+
+  const r = await api('GET', '/admin/access-requests?status=pending');
+  if (r.error) {
+    section.hidden = false;
+    $('requestCount').textContent = '';
+    $('requestList').innerHTML = `<div class="empty">Requests unavailable — ${esc(r.error)}</div>`;
+    return;
+  }
+
+  const reqs = r.requests || [];
+  section.hidden = false;
+  $('requestCount').textContent = reqs.length ? `${reqs.length} pending` : 'none pending';
+
+  if (!reqs.length) {
+    $('requestList').innerHTML = `<div class="empty">Nothing waiting. New requests land here.</div>`;
+    return;
+  }
+
+  $('requestList').innerHTML = reqs.map(q => `
+    <div class="crew-row">
+      <div class="avatar">${esc((q.requester_name || q.email)[0].toUpperCase())}</div>
+      <div class="crew-info">
+        <div class="nm">${esc(q.requester_name)} — ${esc(q.group_name)}</div>
+        <div class="em">${esc(q.email)}${q.note ? ` · ${esc(q.note)}` : ''}</div>
+      </div>
+      <span class="crew-role ${q.kind === 'class' ? 'learner' : ''}">${q.kind === 'class' ? 'Class' : 'Family'}</span>
+      <span class="crew-seen">${esc(relTime(q.created_at))}</span>
+      <button class="btn sm" data-approve="${esc(q.id)}">Approve</button>
+      <button class="btn danger sm" data-deny="${esc(q.id)}">Deny</button>
+    </div>`).join('');
+}
+
+$('requestList').addEventListener('click', async e => {
+  const approve = e.target.closest('[data-approve]');
+  const deny    = e.target.closest('[data-deny]');
+  const btn = approve || deny;
+  if (!btn) return;
+
+  const row  = btn.closest('.crew-row');
+  const who  = row.querySelector('.nm').textContent;
+
+  if (approve) {
+    if (!confirm(`Approve ${who}?\n\nThis creates it and emails them an invitation to sign in.`)) return;
+    btn.disabled = true;
+    const r = await api('POST', `/admin/access-requests/${approve.dataset.approve}/approve`);
+    if (r.error) { btn.disabled = false; toast(r.error, true); return; }
+    toast(r.email_failed ? `Approved — but the email failed: ${r.email_failed}` : `Approved. ${who} has been notified.`,
+          !!r.email_failed);
+  } else {
+    const reason = prompt(`Deny ${who}?\n\nOptional reason (sent to them by email):`, '');
+    if (reason === null) return;
+    btn.disabled = true;
+    const r = await api('POST', `/admin/access-requests/${deny.dataset.deny}/deny`, { reason });
+    if (r.error) { btn.disabled = false; toast(r.error, true); return; }
+    toast('Request denied.');
+  }
+  await loadRequests();
 });
 
 document.addEventListener('keydown', e => {

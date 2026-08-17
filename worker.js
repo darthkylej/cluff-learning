@@ -8,6 +8,11 @@
      GET    /auth/me
      PATCH  /auth/profile
 
+     POST   /access-requests                        (no auth — see below)
+     GET    /admin/access-requests                   (admin)
+     POST   /admin/access-requests/:id/approve       (admin)
+     POST   /admin/access-requests/:id/deny          (admin)
+
      GET    /family
      POST   /family/create
      POST   /family/members/add
@@ -54,10 +59,30 @@
      GET    /parents/overview
      GET    /parents/students/:id
 
-   Registration is closed. An email can only request a login code
-   if a users row already exists for it — created either by a
-   parent via /family/members/add, or by listing the address in
-   the BOOTSTRAP_EMAILS secret.
+   ── Tenancy ─────────────────────────────────────────────────
+   A `families` row is the tenant — a household or a classroom,
+   told apart by families.kind, with 'parent'/'learner' roles
+   underneath either way. A user belongs to exactly one (enforced
+   by a unique index on family_members.user_id), and every handler
+   that reads or writes anyone else's data resolves the caller's
+   family through getMembership() and filters on that id. There is
+   no cross-family read anywhere, and no way to hold two families.
+
+   ── How anyone gets in ──────────────────────────────────────
+   Registration is closed: an email can request a login code only
+   if a users row already exists for it. Rows come from exactly
+   three places, all of them deliberate acts by someone already
+   trusted:
+
+     1. A parent/teacher adds the address to THEIR family.
+     2. An admin approves an access request, which creates the
+        user, the family/class, and the parent membership at once.
+        This is the only way a NEW tenant is born.
+     3. The address is listed in BOOTSTRAP_EMAILS (admin seat).
+
+   A stranger who tries to sign in gets code:'not_registered'
+   back, which is what turns the sign-in screen into the
+   parent/teacher-or-student fork rather than a dead end.
 ============================================================ */
 
 const ALLOWED_ORIGINS = [
@@ -89,6 +114,12 @@ function json(request, data, status = 200) {
   });
 }
 function err(request, msg, status = 400) { return json(request, { error: msg }, status); }
+
+// Anything a stranger typed that ends up inside an email body.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 // ── Crypto helpers ─────────────────────────────────────────────
 function randomCode() {
@@ -172,9 +203,19 @@ async function getSession(request, env) {
   return r.rows?.[0] || null;
 }
 
+// The tenancy boundary, resolved once per request. Everything that
+// touches another person's data goes through this: a caller's reach
+// is exactly the family row this returns, and nothing wider. `kind`
+// is presentation only — a class and a family are the same tenant
+// with different words on screen.
+//
+// `kind` is read through to_jsonb rather than as a plain column (same
+// trick as tools.audience) so this keeps working if the Worker is
+// deployed before migration 007 runs. This function is on the path of
+// almost every request, so it must not be the thing that breaks.
 async function getMembership(env, userId) {
   const r = await query(env,
-    `SELECT f.id, f.name, fm.role
+    `SELECT f.id, f.name, COALESCE(to_jsonb(f) ->> 'kind', 'family') AS kind, fm.role
        FROM families f
        JOIN family_members fm ON fm.family_id = f.id
       WHERE fm.user_id = $1
@@ -196,24 +237,20 @@ async function withUser(request, env, fn) {
 }
 
 // ── Email ──────────────────────────────────────────────────────
-async function sendOtpEmail(env, email, code) {
+const MAIL_SHELL = (inner) =>
+  `<div style="font-family:system-ui,sans-serif;max-width:440px;margin:40px auto;background:#0a1020;border:1px solid #1e3a5f;border-radius:10px;padding:32px;color:#dbe7f5">
+     <div style="font-size:.7rem;letter-spacing:.28em;text-transform:uppercase;color:#4fd1e0">Cluff Learning Systems</div>
+     ${inner}
+   </div>`;
+
+async function sendEmail(env, { to, subject, html }) {
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.RESEND_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from: env.RESEND_FROM,
-      to: email,
-      subject: 'Your Cluff Learning Systems access code',
-      html: `<div style="font-family:system-ui,sans-serif;max-width:440px;margin:40px auto;background:#0a1020;border:1px solid #1e3a5f;border-radius:10px;padding:32px;color:#dbe7f5">
-        <div style="font-size:.7rem;letter-spacing:.28em;text-transform:uppercase;color:#4fd1e0">Cluff Learning Systems</div>
-        <h2 style="color:#eaf3ff;margin:.4em 0 1em;font-weight:600">Access code</h2>
-        <div style="font-size:2.4rem;font-weight:700;letter-spacing:.28em;color:#4fd1e0;margin:20px 0">${code}</div>
-        <p style="color:#8aa4c2;font-size:.85rem;margin:0">Expires in 10 minutes. If you didn't request this, you can ignore it.</p>
-      </div>`,
-    }),
+    body: JSON.stringify({ from: env.RESEND_FROM, to, subject, html }),
   });
   if (!res.ok) {
     const t = await res.text();
@@ -226,17 +263,55 @@ async function sendOtpEmail(env, email, code) {
   }
 }
 
+async function sendOtpEmail(env, email, code) {
+  await sendEmail(env, {
+    to: email,
+    subject: 'Your Cluff Learning Systems access code',
+    html: MAIL_SHELL(`
+      <h2 style="color:#eaf3ff;margin:.4em 0 1em;font-weight:600">Access code</h2>
+      <div style="font-size:2.4rem;font-weight:700;letter-spacing:.28em;color:#4fd1e0;margin:20px 0">${code}</div>
+      <p style="color:#8aa4c2;font-size:.85rem;margin:0">Expires in 10 minutes. If you didn't request this, you can ignore it.</p>`),
+  });
+}
+
+// Everyone who can approve an access request. Admin rows are the real
+// answer; BOOTSTRAP_EMAILS is folded in so the very first deploy —
+// where no admin has logged in yet — still reaches somebody.
+async function adminEmails(env) {
+  const r = await query(env, `SELECT email FROM users WHERE is_admin = true`);
+  const set = new Set(bootstrapEmails(env));
+  for (const row of r.rows || []) set.add(String(row.email).toLowerCase());
+  return [...set];
+}
+
 // ── Auth handlers ──────────────────────────────────────────────
 async function handleSendOtp(request, env) {
   const { email: raw } = await request.json();
   const email = String(raw || '').trim().toLowerCase();
   if (!email.includes('@')) return err(request, 'Please enter a valid email address.');
 
-  // Closed registration: the address must already be known.
+  // Closed registration: the address must already be known. An unknown
+  // address is no longer a dead end — the reply carries `code:
+  // 'not_registered'` plus the state of any request already on file, and
+  // the sign-in screen turns that into the "parent/teacher or student?"
+  // fork rather than a flat refusal.
   const known = await query(env, `SELECT id FROM users WHERE email = $1`, [email]);
   if (!known.rows?.length) {
     if (!bootstrapEmails(env).includes(email)) {
-      return err(request, 'That address is not registered. Ask a parent to add you to the family first.', 403);
+      const prior = await query(env,
+        `SELECT status, decision_note FROM access_requests
+          WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, [email]);
+      const last = prior.rows?.[0] || null;
+      const message = last?.status === 'pending'
+        ? 'Your request is still waiting to be reviewed. We will email you as soon as it is.'
+        : last?.status === 'denied'
+          ? 'That request was not approved.' + (last.decision_note ? ` ${last.decision_note}` : '')
+          : 'That address is not registered yet.';
+      return json(request, {
+        error: message,
+        code: 'not_registered',
+        request_status: last?.status || null,
+      }, 403);
     }
     await query(env, `INSERT INTO users (email, is_admin) VALUES ($1, true) ON CONFLICT (email) DO NOTHING`, [email]);
   }
@@ -319,7 +394,7 @@ async function mePayload(env, userId) {
     is_admin: user.is_admin,
     feedback_level: user.feedback_level,
     role: family?.role || null,
-    family: family ? { id: family.id, name: family.name } : null,
+    family: family ? { id: family.id, name: family.name, kind: family.kind } : null,
   };
 }
 
@@ -367,25 +442,240 @@ async function handleGetFamily(request, env) {
   });
 }
 
+// Self-service tenant creation is closed. A new family or class comes
+// into existence one of exactly two ways: an admin creating one here,
+// or an admin approving an access request. Leaving this open to any
+// signed-in user would let a learner who was removed from a family
+// hand themselves a tenant and parent rights over it.
 async function handleCreateFamily(request, env) {
   return withUser(request, env, async (session) => {
+    if (!session.is_admin) {
+      return err(request, 'New families and classes are created by request only.', 403);
+    }
     if (await getMembership(env, session.user_id)) {
       return err(request, 'You already belong to a family.');
     }
-    const { name } = await request.json();
-    const trimmed = String(name || '').trim().slice(0, 80);
-    if (!trimmed) return err(request, 'A family name is required.');
+    const body = await request.json();
+    const trimmed = String(body.name || '').trim().slice(0, 80);
+    const kind = body.kind === 'class' ? 'class' : 'family';
+    if (!trimmed) return err(request, 'A name is required.');
 
     const fr = await query(env,
-      `INSERT INTO families (name, created_by) VALUES ($1, $2) RETURNING id`,
-      [trimmed, session.user_id]);
+      `INSERT INTO families (name, kind, created_by) VALUES ($1, $2, $3) RETURNING id`,
+      [trimmed, kind, session.user_id]);
     const familyId = fr.rows[0].id;
     await query(env,
       `INSERT INTO family_members (family_id, user_id, role, added_by) VALUES ($1, $2, 'parent', $2)`,
       [familyId, session.user_id]);
 
-    return json(request, { family: { id: familyId, name: trimmed, role: 'parent' } }, 201);
+    return json(request, { family: { id: familyId, name: trimmed, kind, role: 'parent' } }, 201);
   });
+}
+
+/* ── Access requests ────────────────────────────────────────────
+   The only door into the system for someone nobody has added yet.
+   A request is deliberately NOT an account: no users row is written
+   until an admin approves, so a pending request can't request a login
+   code, hold a session, or be reachable by any family-scoped query.
+──────────────────────────────────────────────────────────────── */
+
+// Unauthenticated by design — this is what a stranger at the sign-in
+// screen can do. The unique partial index on (email) WHERE pending is
+// what keeps one address from filing a queue of requests.
+async function handleCreateAccessRequest(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const email = String(body.email || '').trim().toLowerCase();
+  const name  = String(body.requester_name || '').trim().slice(0, 60);
+  const group = String(body.group_name || '').trim().slice(0, 80);
+  const kind  = body.kind === 'class' ? 'class' : 'family';
+  const note  = String(body.note || '').trim().slice(0, 500);
+
+  if (!email.includes('@')) return err(request, 'Please enter a valid email address.');
+  if (!name)  return err(request, 'Please enter your name.');
+  if (!group) return err(request, kind === 'class' ? 'Please name your class.' : 'Please name your family.');
+
+  const known = await query(env, `SELECT id FROM users WHERE email = $1`, [email]);
+  if (known.rows?.length) {
+    return err(request, 'That address is already registered — just sign in with it.');
+  }
+
+  // Let the partial unique index settle "is one already open?" rather
+  // than checking first and inserting after — two clicks on Send would
+  // both pass a pre-check and the second insert would blow up. No row
+  // back means one was already pending, which is not an error.
+  const ins = await query(env,
+    `INSERT INTO access_requests (email, requester_name, group_name, kind, note)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (email) WHERE status = 'pending' DO NOTHING
+     RETURNING id`,
+    [email, name, group, kind, note]);
+  if (!ins.rows?.length) {
+    return json(request, { ok: true, already_pending: true });
+  }
+
+  // A request nobody hears about is a request nobody approves, but a
+  // mail failure must not lose the row — it is already committed, and
+  // the admin panel lists it either way.
+  try {
+    const to = await adminEmails(env);
+    if (to.length) {
+      await sendEmail(env, {
+        to,
+        subject: `New ${kind} request — ${group}`,
+        html: MAIL_SHELL(`
+          <h2 style="color:#eaf3ff;margin:.4em 0 .8em;font-weight:600">Access request</h2>
+          <p style="margin:.2em 0"><b style="color:#eaf3ff">${escapeHtml(name)}</b> &lt;${escapeHtml(email)}&gt;</p>
+          <p style="margin:.2em 0;color:#8aa4c2">wants to start the ${kind} <b style="color:#eaf3ff">${escapeHtml(group)}</b></p>
+          ${note ? `<p style="margin:1em 0;padding:12px;background:#0d1526;border-left:2px solid #4fd1e0;color:#dbe7f5;font-size:.9rem">${escapeHtml(note)}</p>` : ''}
+          <p style="color:#8aa4c2;font-size:.85rem;margin-top:1.4em">Approve or deny it from the Access Requests panel when you sign in.</p>`),
+      });
+    }
+  } catch (e) {
+    console.error('Access request notification failed', e.message);
+  }
+
+  return json(request, { ok: true }, 201);
+}
+
+async function handleListAccessRequests(request, env) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+  const status = new URL(request.url).searchParams.get('status') || 'pending';
+  const filter = ['pending', 'approved', 'denied'].includes(status) ? status : 'pending';
+  const r = await query(env,
+    `SELECT ar.id, ar.email, ar.requester_name, ar.group_name, ar.kind, ar.note,
+            ar.status, ar.decision_note, ar.reviewed_at, ar.created_at,
+            f.name AS family_name
+       FROM access_requests ar
+       LEFT JOIN families f ON f.id = ar.family_id
+      WHERE ar.status = $1
+      ORDER BY ar.created_at DESC
+      LIMIT 200`,
+    [filter]);
+  return json(request, { requests: r.rows || [], status: filter });
+}
+
+// Approval is the moment a tenant is born. It creates the users row,
+// the family/class row, and the parent membership together — so an
+// approved requester lands with exactly one tenant and no path to a
+// second one.
+//
+// The Neon HTTP endpoint gives no transaction across these calls, so
+// the order is chosen to be safe to re-run: the request is only marked
+// approved LAST, and every step before it is idempotent. A failure
+// half-way leaves the request pending, and approving again picks up
+// exactly where it stopped.
+async function handleApproveAccessRequest(request, env, id) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+
+  const rr = await query(env, `SELECT * FROM access_requests WHERE id = $1`, [id]);
+  const req = rr.rows?.[0];
+  if (!req) return err(request, 'Request not found.', 404);
+  if (req.status !== 'pending') return err(request, 'That request has already been reviewed.', 409);
+
+  const body  = await request.json().catch(() => ({}));
+  const group = String(body.group_name || req.group_name).trim().slice(0, 80) || req.group_name;
+  const kind  = body.kind === 'class' ? 'class' : body.kind === 'family' ? 'family' : req.kind;
+
+  await query(env,
+    `INSERT INTO users (email, display_name) VALUES ($1, $2)
+     ON CONFLICT (email) DO UPDATE SET display_name = COALESCE(users.display_name, EXCLUDED.display_name)`,
+    [req.email, req.requester_name]);
+  const ur = await query(env, `SELECT id FROM users WHERE email = $1`, [req.email]);
+  const userId = ur.rows[0].id;
+
+  // Somebody added them to a family in the meantime. Close the request
+  // rather than handing them a second tenant — one family per user is
+  // the invariant the whole isolation model rests on.
+  const existing = await getMembership(env, userId);
+  if (existing) {
+    await query(env,
+      `UPDATE access_requests
+          SET status = 'approved', reviewed_by = $1, reviewed_at = NOW(), family_id = $2,
+              decision_note = 'Already a member of an existing family or class.'
+        WHERE id = $3`,
+      [gate.session.user_id, existing.id, id]);
+    return json(request, { ok: true, family: existing, already_member: true });
+  }
+
+  const fr = await query(env,
+    `INSERT INTO families (name, kind, created_by) VALUES ($1, $2, $3) RETURNING id`,
+    [group, kind, userId]);
+  const familyId = fr.rows[0].id;
+  await query(env,
+    `INSERT INTO family_members (family_id, user_id, role, added_by) VALUES ($1, $2, 'parent', $2)`,
+    [familyId, userId]);
+  await query(env,
+    `UPDATE access_requests
+        SET status = 'approved', reviewed_by = $1, reviewed_at = NOW(), family_id = $2,
+            group_name = $3, kind = $4
+      WHERE id = $5`,
+    [gate.session.user_id, familyId, group, kind, id]);
+
+  const leader  = kind === 'class' ? 'teacher' : 'parent';
+  const members = kind === 'class' ? 'students' : 'family';
+  try {
+    await sendEmail(env, {
+      to: req.email,
+      subject: `Your ${kind} is ready — Cluff Learning Systems`,
+      html: MAIL_SHELL(`
+        <h2 style="color:#eaf3ff;margin:.4em 0 .8em;font-weight:600">You're approved</h2>
+        <p style="color:#dbe7f5;margin:.2em 0">
+          <b style="color:#eaf3ff">${escapeHtml(group)}</b> is set up, and you're its ${leader}.</p>
+        <p style="color:#8aa4c2;font-size:.9rem;margin:1em 0">
+          Sign in with <b style="color:#dbe7f5">${escapeHtml(req.email)}</b> and you'll get a one-time code by email.
+          Once you're in, add your ${members} by email address from the roster — nobody can register on their own,
+          so an address only works after you add it.</p>
+        <p style="margin:1.6em 0 0">
+          <a href="https://darthkylej.github.io/cluff-learning/"
+             style="display:inline-block;background:#4fd1e0;color:#04070f;text-decoration:none;font-weight:600;padding:11px 20px;border-radius:7px">Sign in</a></p>`),
+    });
+  } catch (e) {
+    console.error('Approval notification failed', e.message);
+    return json(request, { ok: true, family: { id: familyId, name: group, kind }, email_failed: e.message });
+  }
+
+  return json(request, { ok: true, family: { id: familyId, name: group, kind } });
+}
+
+async function handleDenyAccessRequest(request, env, id) {
+  const gate = await requireAdminSession(request, env);
+  if (gate.error) return gate.error;
+
+  const rr = await query(env, `SELECT * FROM access_requests WHERE id = $1`, [id]);
+  const req = rr.rows?.[0];
+  if (!req) return err(request, 'Request not found.', 404);
+  if (req.status !== 'pending') return err(request, 'That request has already been reviewed.', 409);
+
+  const body   = await request.json().catch(() => ({}));
+  const reason = String(body.reason || '').trim().slice(0, 300);
+  const notify = body.notify !== false;
+
+  await query(env,
+    `UPDATE access_requests
+        SET status = 'denied', decision_note = $1, reviewed_by = $2, reviewed_at = NOW()
+      WHERE id = $3`,
+    [reason, gate.session.user_id, id]);
+
+  if (notify) {
+    try {
+      await sendEmail(env, {
+        to: req.email,
+        subject: 'About your Cluff Learning Systems request',
+        html: MAIL_SHELL(`
+          <h2 style="color:#eaf3ff;margin:.4em 0 .8em;font-weight:600">Request not approved</h2>
+          <p style="color:#dbe7f5;margin:.2em 0">
+            We weren't able to approve the request for <b style="color:#eaf3ff">${escapeHtml(req.group_name)}</b>.</p>
+          ${reason ? `<p style="margin:1em 0;padding:12px;background:#0d1526;border-left:2px solid #4fd1e0;color:#dbe7f5;font-size:.9rem">${escapeHtml(reason)}</p>` : ''}
+          <p style="color:#8aa4c2;font-size:.85rem;margin-top:1.2em">If you think this was a mistake, just reply to this email.</p>`),
+      });
+    } catch (e) {
+      console.error('Denial notification failed', e.message);
+    }
+  }
+
+  return json(request, { ok: true });
 }
 
 async function handleAddMember(request, env) {
@@ -1099,7 +1389,17 @@ async function requireParentSession(request, env) {
   return { session, family };
 }
 
+// Returns null unless this user is actually a target of this assignment.
+// That check has to live HERE rather than in each caller: an assignment
+// id is just a uuid in a URL, and without it any signed-in user from any
+// family could write, grade, and read back an essay against another
+// family's prompt — which also spends grading credits on their behalf.
 async function getOrCreateEssay(env, assignmentId, userId) {
+  const target = await query(env,
+    `SELECT 1 FROM essay_assignment_targets WHERE assignment_id = $1 AND user_id = $2`,
+    [assignmentId, userId]);
+  if (!target.rows?.length) return null;
+
   const existing = await query(env, `SELECT * FROM essays WHERE assignment_id = $1 AND user_id = $2`, [assignmentId, userId]);
   if (existing.rows?.length) return existing.rows[0];
   const created = await query(env,
@@ -1253,15 +1553,12 @@ async function handleListAssignments(request, env) {
 
 async function handleGetEssay(request, env, assignmentId) {
   return withUser(request, env, async (session) => {
-    const target = await query(env,
-      `SELECT 1 FROM essay_assignment_targets WHERE assignment_id = $1 AND user_id = $2`,
-      [assignmentId, session.user_id]);
-    if (!target.rows?.length) return err(request, 'Not found.', 404);
+    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (!essay) return err(request, 'Not found.', 404);
 
     const ar = await query(env, `SELECT id, title, prompt, length_guidance FROM essay_assignments WHERE id = $1`, [assignmentId]);
     if (!ar.rows?.length) return err(request, 'Not found.', 404);
 
-    const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
     return json(request, {
       assignment: ar.rows[0],
       essay: { id: essay.id, status: essay.status, draft_text: essay.draft_text, draft_updated_at: essay.draft_updated_at },
@@ -1272,6 +1569,7 @@ async function handleGetEssay(request, env, assignmentId) {
 async function handleSaveDraft(request, env, assignmentId) {
   return withUser(request, env, async (session) => {
     const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (!essay) return err(request, 'Not found.', 404);
     if (essay.status === 'graded') return err(request, 'This essay has already been graded.', 409);
     const { draft_text } = await request.json();
     await query(env, `UPDATE essays SET draft_text = $1, draft_updated_at = NOW() WHERE id = $2`,
@@ -1283,6 +1581,7 @@ async function handleSaveDraft(request, env, assignmentId) {
 async function handleGradeEssay(request, env, assignmentId) {
   return withUser(request, env, async (session) => {
     const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (!essay) return err(request, 'Not found.', 404);
     if (essay.status === 'graded') return err(request, 'This essay has already been graded.', 409);
     if (!essay.draft_text || !essay.draft_text.trim()) return err(request, 'Write something before grading.');
 
@@ -1393,6 +1692,7 @@ async function handleGradeEssay(request, env, assignmentId) {
 async function handleSavePractice(request, env, assignmentId) {
   return withUser(request, env, async (session) => {
     const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (!essay) return err(request, 'Not found.', 404);
     if (essay.status !== 'graded') return err(request, 'Grade the essay first.', 409);
     const { practice_text } = await request.json();
     const coaching = essay.coaching || {};
@@ -1405,6 +1705,7 @@ async function handleSavePractice(request, env, assignmentId) {
 async function handleCoachingCheck(request, env, assignmentId) {
   return withUser(request, env, async (session) => {
     const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
+    if (!essay) return err(request, 'Not found.', 404);
     if (essay.status !== 'graded') return err(request, 'Grade the essay first.', 409);
     const { issue_index } = await request.json();
     const coaching = essay.coaching || { issues: [], practice_text: essay.original_text || '' };
@@ -1447,10 +1748,16 @@ async function handleGetEssayResults(request, env, assignmentId, studentId) {
     const isParent = !!(family && family.role === 'parent');
     if (!isSelf && !isParent) return err(request, 'Not found.', 404);
 
+    // Both halves matter. The assignment has to be this family's, AND
+    // the student has to still be in it — a learner who moved on keeps
+    // their old essays, and they aren't their old parent's to read.
     if (isParent && !isSelf) {
       const owns = await query(env, `SELECT 1 FROM essay_assignments WHERE id = $1 AND family_id = $2`,
         [assignmentId, family.id]);
       if (!owns.rows?.length) return err(request, 'Not found.', 404);
+      const member = await query(env,
+        `SELECT 1 FROM family_members WHERE family_id = $1 AND user_id = $2`, [family.id, studentId]);
+      if (!member.rows?.length) return err(request, 'Not found.', 404);
     }
 
     const r = await query(env,
@@ -2070,16 +2377,21 @@ async function handleCreateSpanishSession(request, env) {
         WHERE user_id = $1 AND status = 'active'`,
       [session.user_id]);
 
-    // Layer 1 — budget gates, before anything paid happens.
+    // Layer 1 — budget gates, before anything paid happens. The monthly
+    // ceiling is per FAMILY, not platform-wide: an unscoped sum means the
+    // busiest household spends every other family's month, which is a
+    // tenant leaking into tenants through the billing meter.
     const usage = await query(env,
       `SELECT
-         COALESCE((SELECT SUM(input_audio_seconds + output_audio_seconds)
-                     FROM spanish_sessions
-                    WHERE started_at >= date_trunc('month', NOW())), 0) AS month_secs,
+         COALESCE((SELECT SUM(s.input_audio_seconds + s.output_audio_seconds)
+                     FROM spanish_sessions s
+                     JOIN family_members fm ON fm.user_id = s.user_id
+                    WHERE fm.family_id = $2
+                      AND s.started_at >= date_trunc('month', NOW())), 0) AS month_secs,
          (SELECT COUNT(*) FROM spanish_sessions
            WHERE user_id = $1 AND started_at::date = CURRENT_DATE
              AND status <> 'failed') AS today_sessions`,
-      [session.user_id]);
+      [session.user_id, family.id]);
 
     const monthMinutes  = Number(usage.rows?.[0]?.month_secs || 0) / 60;
     const todaySessions = Number(usage.rows?.[0]?.today_sessions || 0);
@@ -2601,7 +2913,7 @@ async function handleSpanishReport(request, env, studentId) {
     const problem = await spanishAssertSameFamily(env, session.user_id, studentId);
     if (problem) return err(request, problem, 403);
 
-    const [profile, streak, sessionsR, skillsR, vocabR, monthR] = await Promise.all([
+    const [profile, streak, sessionsR, skillsR, vocabR, monthR, familyMonthR] = await Promise.all([
       getSpanishProfile(env, studentId),
       spanishStreak(env, studentId),
       query(env, `SELECT id, started_at, duration_seconds, scenario_key, topic_key, summary
@@ -2617,9 +2929,18 @@ async function handleSpanishReport(request, env, studentId) {
       query(env, `SELECT COALESCE(SUM(input_audio_seconds + output_audio_seconds),0) AS secs
                     FROM spanish_sessions
                    WHERE user_id = $1 AND started_at >= date_trunc('month', NOW())`, [studentId]),
+      // The cap is spent by the whole family, so a parent needs to see
+      // the number the cap is actually measured against, not just this
+      // one child's share of it.
+      query(env, `SELECT COALESCE(SUM(s.input_audio_seconds + s.output_audio_seconds),0) AS secs
+                    FROM spanish_sessions s
+                    JOIN family_members fm ON fm.user_id = s.user_id
+                   WHERE fm.family_id = (SELECT family_id FROM family_members WHERE user_id = $1)
+                     AND s.started_at >= date_trunc('month', NOW())`, [studentId]),
     ]);
 
     const monthMinutes = Number(monthR.rows?.[0]?.secs || 0) / 60;
+    const familyMonthMinutes = Number(familyMonthR.rows?.[0]?.secs || 0) / 60;
     return json(request, {
       settings: {
         correction_intensity: profile.correction_intensity,
@@ -2638,6 +2959,8 @@ async function handleSpanishReport(request, env, studentId) {
         vocabulary_produced: Number(vocabR.rows?.[0]?.produced || 0),
       },
       month_audio_minutes: Math.round(monthMinutes),
+      family_month_audio_minutes: Math.round(familyMonthMinutes),
+      month_audio_cap: Math.round(spanishNum(env.SPANISH_MONTHLY_AUDIO_MINUTES, 60, 100000, 2400)),
       // Rough guide only: Claude turn cost + TTS at ~$0.015/min of coach speech.
       month_cost_estimate: Number((monthMinutes * 0.028).toFixed(2)),
       recent_sessions: sessionsR.rows || [],
@@ -3093,6 +3416,19 @@ export default {
       if (path === '/auth/logout'     && method === 'POST')  return await handleLogout(request, env);
       if (path === '/auth/me'         && method === 'GET')   return await handleMe(request, env);
       if (path === '/auth/profile'    && method === 'PATCH') return await handleUpdateProfile(request, env);
+
+      // Unauthenticated by design: the one door for someone nobody has
+      // added yet. It creates a request, never an account.
+      if (path === '/access-requests' && method === 'POST') return await handleCreateAccessRequest(request, env);
+
+      if (path === '/admin/access-requests' && method === 'GET') return await handleListAccessRequests(request, env);
+
+      const arMatch = path.match(/^\/admin\/access-requests\/([0-9a-fA-F-]{36})\/(approve|deny)$/);
+      if (arMatch && method === 'POST') {
+        return arMatch[2] === 'approve'
+          ? await handleApproveAccessRequest(request, env, arMatch[1])
+          : await handleDenyAccessRequest(request, env, arMatch[1]);
+      }
 
       if (path === '/family'                && method === 'GET')  return await handleGetFamily(request, env);
       if (path === '/family/create'         && method === 'POST') return await handleCreateFamily(request, env);

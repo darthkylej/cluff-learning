@@ -40,13 +40,50 @@ Everyone — parents and kids — signs in with their own email address and a
 6-digit code. There is no password.
 
 **Registration is closed.** `/auth/send-otp` refuses any address that doesn't
-already have a `users` row. Rows are created two ways:
+already have a `users` row. Rows are created three ways:
 
-1. A parent adds someone via **+ Add member** on the bridge.
-2. The address is listed in the `BOOTSTRAP_EMAILS` secret — that's the escape
-   hatch that lets the first parent in.
+1. A parent or teacher adds someone via **+ Add member** on the bridge.
+2. An admin approves an **access request** (below). This is the only way a new
+   family or class comes into existence.
+3. The address is listed in the `BOOTSTRAP_EMAILS` secret — that's the escape
+   hatch that lets the first admin in.
 
 This keeps strangers from creating accounts on a site the kids use.
+
+### Access requests — how a new family or class starts
+
+Closed registration used to be a dead end: an unknown address got a flat
+refusal and no way forward. It now forks instead.
+
+1. Someone unknown enters their email. `/auth/send-otp` replies 403 with
+   `code: 'not_registered'`, and the sign-in screen turns that into a
+   question: *parent/teacher, or student?*
+2. **Student** → told to ask their teacher or parent to add them. Nothing is
+   recorded; students never self-register.
+3. **Parent/teacher** → a short form (name, family-or-class, what to call it,
+   optional note) posts to `POST /access-requests`. This writes an
+   `access_requests` row and emails the admins. It does **not** create a
+   `users` row — a pending request can't request a login code, hold a session,
+   or be seen by any family-scoped query.
+4. An admin sees it in the **Access Requests** panel on the bridge and
+   approves or denies it. Approval creates the `users` row, the family/class,
+   and the parent membership in one go, then emails the requester. Denial
+   emails them too, with an optional reason.
+5. They sign in and add their own people. A denied address can file again; a
+   pending one can't (unique partial index on `email WHERE status='pending'`).
+
+`POST /access-requests` is the only unauthenticated write in the API. It is
+deliberately cheap to abuse in one direction — a flood of distinct addresses
+would fill the admin inbox — and has no rate limit yet.
+
+### Families and classes are the same thing
+
+`families.kind` is `'family'` or `'class'`. The roles underneath are `parent`
+and `learner` either way: a teacher **is** a parent row, a student **is** a
+learner row. That means every scoping query in the Worker is identical for
+both, and only the words on screen change (the frontend `lex()` helper). The
+starship flavour — Commander, Cadet, Crew Roster — is the product's voice and
+stays put.
 
 Differences from condscript's auth, all deliberate:
 
@@ -62,7 +99,10 @@ Differences from condscript's auth, all deliberate:
 - `sessions` — server-side session rows; the JWT only carries a session id, so
   deleting the row revokes the token immediately
 - `families` / `family_members` — the tenancy boundary, with `parent` /
-  `learner` roles. One family per person.
+  `learner` roles. One family per person, enforced by a unique index on
+  `family_members.user_id`. `families.kind` says household or classroom.
+- `access_requests` — strangers asking for a family or class. Not accounts:
+  approval is what creates the `users` row.
 - `tools` — the module registry that renders the homepage grid
 - `tool_access` — per-learner enable/disable, set by a parent
 - `tool_progress` — generic `jsonb` state bucket, one row per (user, tool)
@@ -133,17 +173,25 @@ origins you serve from to `ALLOWED_ORIGINS` in `worker.js`.
 Sign in with a `BOOTSTRAP_EMAILS` address → create the family → add each kid by
 email. They can sign in from that point on.
 
+That address is an admin, which is also what puts the **Access Requests** panel
+on your bridge. Anyone else who wants in files a request from the sign-in
+screen and waits for you to approve it.
+
 ## API
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/auth/send-otp` | `{email}` — 403 if not registered |
+| POST | `/auth/send-otp` | `{email}` — 403 + `code:'not_registered'` if unknown |
 | POST | `/auth/verify-otp` | `{email, code}` → `{token, user}` |
 | POST | `/auth/logout` | deletes the session row |
 | GET | `/auth/me` | current user + family + role |
 | PATCH | `/auth/profile` | `{display_name?, avatar_key?}` |
+| POST | `/access-requests` | `{email, requester_name, group_name, kind, note?}` — **no auth** |
+| GET | `/admin/access-requests` | `?status=pending\|approved\|denied` — admin only |
+| POST | `/admin/access-requests/:id/approve` | creates the user, family/class, and membership |
+| POST | `/admin/access-requests/:id/deny` | `{reason?, notify?}` |
 | GET | `/family` | family + member roster |
-| POST | `/family/create` | `{name}` — caller becomes parent |
+| POST | `/family/create` | `{name, kind?}` — **admin only**; everyone else comes in by approval |
 | POST | `/family/members/add` | `{email, display_name?, role?}` — parent only |
 | POST | `/family/members/remove` | `{email}` — parent only |
 | POST | `/family/leave` | blocked if you're the last parent |
