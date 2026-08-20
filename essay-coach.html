@@ -276,13 +276,14 @@ main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3
         <div class="score-real" id="scoreReal" hidden></div>
       </div>
 
+      <div class="sec-head"><h2>Most Important Feedback</h2><div class="rule"></div></div>
+      <div class="panel narrative" id="overallFeedback"></div>
+
+      <div class="sec-head"><h2>Detailed Breakdown</h2><div class="rule"></div></div>
       <div id="strengthsBlock"></div>
 
       <div class="sec-head"><h2>Rubric</h2><div class="rule"></div></div>
       <div class="rubric-grid" id="rubricGrid"></div>
-
-      <div class="sec-head"><h2>Overall Feedback</h2><div class="rule"></div></div>
-      <div class="panel narrative" id="overallFeedback"></div>
 
       <div class="sec-head"><h2>Sentence by Sentence</h2><div class="rule"></div></div>
       <div class="sentence-list" id="sentenceList"></div>
@@ -614,7 +615,6 @@ async function openResults(assignmentId,studentId){
   }).join('');
 
   $('overallFeedback').textContent=f.overall_feedback||'';
-  if(f.length_assessment) $('overallFeedback').textContent+='\n\n'+f.length_assessment;
 
   $('sentenceList').innerHTML=(f.sentences||[]).map(s=>{
     const issues=s.issues||[];
