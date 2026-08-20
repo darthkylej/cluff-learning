@@ -1243,7 +1243,7 @@ const GRADE_TOOL = {
         }])),
       },
       strengths:         { type: 'array', items: { type: 'string' }, description: '2-4 specific, genuine things this essay does well.' },
-      overall_feedback:  { type: 'string', description: 'A few paragraphs on flow, organization, voice, consistency, persuasiveness, and any logical fallacies.' },
+      overall_feedback:  { type: 'string', description: 'One short paragraph of exactly four sentences: one specific strength, the single biggest issue to improve, a second specific strength, and a brief encouraging wrap-up.' },
       length_assessment: { type: 'string', description: 'One sentence on whether the length was reasonable for making the point — not a word-count judgment.' },
       issues_catalog: {
         type: 'array',
@@ -1277,12 +1277,9 @@ const COACHING_CHECK_TOOL = {
   },
 };
 
-function buildGradingSystemPrompt(assignment, issueHistory, feedbackLevel) {
+function buildGradingSystemPrompt(assignment, feedbackLevel) {
   const band = feedbackBand(feedbackLevel);
   const rubricLines = Object.entries(ESSAY_RUBRIC).map(([, v]) => `- ${v.label}: ${v.max} points`).join('\n');
-  const historyLines = (issueHistory || []).length
-    ? issueHistory.map(h => `- ${h.issue_type} (${h.tier}): flagged in ${h.times_flagged} previous essay(s), recurred ${h.times_recurred_after_flagged} time(s) after being told about it`).join('\n')
-    : '(no prior essays on record for this student)';
 
   return `You are a rigorous, fair college writing instructor grading a first-year college-level essay. Grade honestly and consistently — do not adjust the rubric for the student's age or grade level; grade the writing itself as if it were submitted to a college composition course.
 
@@ -1299,12 +1296,17 @@ ${assignment.prompt}
 """
 Length guidance given to the student: ${assignment.length_guidance || '(none specified)'}
 
-THIS STUDENT'S RECURRING ISSUE HISTORY (from past essays):
-${historyLines}
-If an issue below recurs from this history, say so plainly in your feedback and treat it as more serious than a first-time slip — the student has already been told.
-
 FEEDBACK VOICE:
 Write every piece of prose the student will read — sentence notes and suggestions, rubric notes, strengths, overall feedback, and the descriptions in issues_catalog — for ${band.label}. ${band.guidance}
+
+Treat every issue in this essay on its own merits. Do not chastise the student for having made the same kind of mistake in earlier essays, do not intensify the language because an issue is recurring, and do not mention how many times they have made it before. Skills such as spelling and mechanics take sustained practice over many essays. Simply identify what is wrong now and explain what would improve it.
+
+The overall_feedback field is the most important student-facing summary. A younger student may read only this paragraph, so make it count. It MUST be one short paragraph of exactly four sentences:
+1. Start with one specific, genuine thing the student did well in THIS essay.
+2. Identify ONLY the single biggest issue holding THIS essay back and state clearly what the student should do differently. Do not cram multiple weaknesses into this sentence.
+3. Give one more specific, genuine thing the student did well.
+4. End with a short encouraging statement that ties the feedback together and leaves the student knowing what to work on next.
+Keep this paragraph compact and punchy. Do not summarize the whole rubric here. The detailed rubric, sentence notes, strengths list, and issue catalog are where advanced writers can get the full breakdown.
 
 This governs only HOW you word things. It must NOT change what you look for or how you score:
 - Score against the fixed college rubric above regardless of this setting. A 74 means the same thing at every level.
@@ -1331,18 +1333,16 @@ Be encouraging but honest — don't rubber-stamp a fix that isn't there, but don
 Write your note for ${band.label}. ${band.guidance} This affects only your wording, not how strictly you judge whether the issue was actually fixed. Call submit_fix_verdict with your result.`;
 }
 
-function selectTopIssues(catalog, history) {
-  const historyByType = new Map((history || []).map(h => [h.issue_type, h]));
+function selectTopIssues(catalog) {
   const tierRank = t => { const i = ISSUE_TIERS.indexOf(t); return i >= 0 ? i : 0; };
-  const scored = (catalog || []).map(issue => {
-    const type = String(issue.issue_type || '').trim();
-    const h = historyByType.get(type);
-    const recurrence = h ? h.times_recurred_after_flagged : 0;
-    // Issues the student has been told about repeatedly jump the queue,
-    // regardless of tier — everything else follows foundational-first order.
-    const priority = recurrence >= 2 ? -100 : tierRank(issue.tier);
-    return { issue, type, priority, recurrence };
-  }).sort((a, b) => a.priority - b.priority || b.recurrence - a.recurrence);
+  const severityRank = { major: 0, moderate: 1, minor: 2 };
+  const scored = (catalog || []).map((issue, index) => ({
+    issue,
+    type: String(issue.issue_type || '').trim(),
+    tier: tierRank(issue.tier),
+    severity: severityRank[issue.severity] ?? 2,
+    index,
+  })).sort((a, b) => a.tier - b.tier || a.severity - b.severity || a.index - b.index);
 
   const picked = []; const seen = new Set();
   for (const s of scored) {
@@ -1354,7 +1354,7 @@ function selectTopIssues(catalog, history) {
   return picked;
 }
 
-function computeAdaptiveScore(scoreTotal, priorScores, persistentOffender) {
+function computeAdaptiveScore(scoreTotal, priorScores) {
   let adaptive;
   if (!priorScores.length) {
     // First essay ever: compress upward so a rough first attempt still
@@ -1366,7 +1366,6 @@ function computeAdaptiveScore(scoreTotal, priorScores, persistentOffender) {
     // Reward improvement generously; soften but don't erase a decline.
     adaptive = 78 + delta * (delta >= 0 ? 2.2 : 1.3);
   }
-  if (persistentOffender) adaptive -= 9; // told repeatedly, still unresolved
   return clampInt(adaptive, 35, 100);
 }
 
@@ -1591,16 +1590,10 @@ async function handleGradeEssay(request, env, assignmentId) {
 
     await query(env, `UPDATE essays SET status = 'grading' WHERE id = $1`, [essay.id]);
 
-    const historyR = await query(env,
-      `SELECT issue_type, tier, times_flagged, times_recurred_after_flagged
-         FROM essay_issue_history WHERE user_id = $1
-        ORDER BY times_recurred_after_flagged DESC, times_flagged DESC LIMIT 20`,
-      [session.user_id]);
-
     let result;
     try {
       result = await callClaude(env, {
-        system: buildGradingSystemPrompt(assignment, historyR.rows || [], session.feedback_level),
+        system: buildGradingSystemPrompt(assignment, session.feedback_level),
         content: essay.draft_text,
         tool: GRADE_TOOL,
       });
@@ -1640,7 +1633,7 @@ async function handleGradeEssay(request, env, assignmentId) {
         [session.user_id, type, tier, recurred, essay.id]);
     }
 
-    const topFive = selectTopIssues(catalog, historyR.rows || []);
+    const topFive = selectTopIssues(catalog);
     for (const issue of topFive) {
       await query(env,
         `UPDATE essay_issue_history SET times_in_top_five = times_in_top_five + 1, updated_at = NOW()
@@ -1653,9 +1646,7 @@ async function handleGradeEssay(request, env, assignmentId) {
         ORDER BY graded_at DESC LIMIT 5`,
       [session.user_id, essay.id]);
     const priorScores = (priorR.rows || []).map(r => r.score_total).filter(n => n != null);
-    const persistentOffender = (historyR.rows || []).some(h =>
-      h.times_recurred_after_flagged >= 3 && catalog.some(c => c.issue_type === h.issue_type));
-    const adaptiveScore = computeAdaptiveScore(scoreTotal, priorScores, persistentOffender);
+    const adaptiveScore = computeAdaptiveScore(scoreTotal, priorScores);
 
     const feedback = {
       sentences: result.sentences || [], rubric, strengths: result.strengths || [],
@@ -2810,7 +2801,7 @@ This session used unit: ${sess.topic_key || '(none)'} and scenario: ${sess.scena
   });
 }
 
-// ── Profile / streak ───────────────────────────────────────────
+// ── Profile / streak ────────────────────────────────────────────
 async function spanishStreak(env, userId) {
   // Seconds spoken, not seconds elapsed — the same number the Flight Deck
   // reports, so a streak and a report never disagree about the same day.
