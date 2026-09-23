@@ -587,17 +587,18 @@ const Voice=(function(){
     try{ window.speechSynthesis.cancel(); }catch(e){}
     window.speechSynthesis.speak(utter(text,r));
   }
-  /* say it, brief pause, say it again a touch slower — much easier to catch */
-  function sayWord(word,r){
+  /* Say the spelling word once, then read its example sentence. */
+  function sayWord(word,r,sentence){
     if(!('speechSynthesis' in window)||!word) return;
     try{ window.speechSynthesis.cancel(); }catch(e){}
     const rr=clamp(r||rate,0.4,1.5);
+    const s=String(sentence||'').replace(/_+/g,' '+word+' ').replace(/\s+/g,' ').trim();
     window.speechSynthesis.speak(utter(word,rr));
-    setTimeout(()=>{ try{ window.speechSynthesis.speak(utter(word,Math.max(0.5,rr-0.07))); }catch(e){} },700);
+    if(s) setTimeout(()=>{ try{ window.speechSynthesis.speak(utter(s,rr)); }catch(e){} },650);
   }
   function sayInSentence(word,sentence){
     const s=String(sentence||'').replace(/_+/g,' '+word+' ').replace(/\s+/g,' ').trim();
-    say(word+'. '+(s||word)+'. '+word+'.', Math.max(0.68,rate));
+    say(s||word, Math.max(0.68,rate));
   }
   if('speechSynthesis' in window){
     refresh();
@@ -836,7 +837,7 @@ function startLevel(){
   show('spell');
   answerInput.value=''; answerInput.classList.remove('shake','glow-ok');
   try{ answerInput.focus({preventScroll:true}); }catch(e){}
-  setTimeout(()=>{ if(w0) Voice.sayWord(w0); },150);
+  setTimeout(()=>{ if(w0) Voice.sayWord(w0,undefined,window.sentenceFor(w0)); },150);
 }
 function updateSpellHUD(){
   wordIndexEl.textContent=Math.min(12,state.idx+1);
@@ -870,7 +871,7 @@ function scoreWord(user,actual){
     state.idx++;
     if(state.idx<12){
       const w=state.words[state.idx];
-      if(w){ Voice.sayWord(w); sentenceArea.textContent='“'+(window.sentenceFor(w)||'…')+'”'; }
+      if(w){ Voice.sayWord(w,undefined,window.sentenceFor(w)); sentenceArea.textContent='“'+(window.sentenceFor(w)||'…')+'”'; }
       hintArea.classList.add('hidden');
     }
   } else {
@@ -897,8 +898,8 @@ function scoreWord(user,actual){
     setTimeout(()=>openShop(), state.correct===12?1400:500);
   }
 }
-document.getElementById('btnSpeak').onclick=()=>Voice.sayWord(currentWord());
-document.getElementById('btnSpeakSlow').onclick=()=>Voice.sayWord(currentWord(),Math.max(0.5,Voice.rate-0.2));
+document.getElementById('btnSpeak').onclick=()=>{ const w=currentWord(); if(w) Voice.sayWord(w,undefined,window.sentenceFor(w)); };
+document.getElementById('btnSpeakSlow').onclick=()=>{ const w=currentWord(); if(w) Voice.sayWord(w,Math.max(0.5,Voice.rate-0.2),window.sentenceFor(w)); };
 document.getElementById('btnSpeakSentence').onclick=()=>{
   const w=currentWord(); if(w) Voice.sayInSentence(w,window.sentenceFor(w));
 };
