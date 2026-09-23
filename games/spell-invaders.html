@@ -1631,10 +1631,25 @@ function update(dt,keys){
         return;
       }
       const isBot=target.maxHp===3&&target.w===18;
-      const tx=isBot?target.x:target.x+target.w/2,ty=isBot?target.y-12:target.y-16;
+      let tx,ty,repairRange;
+      if(isBot){
+        // Bots repairing a teammate form a loose ring instead of stacking.
+        const helpers=world.repairBots.filter(other=>other!==target&&other.target===target);
+        const slot=Math.max(0,helpers.indexOf(bot)),angle=(slot/helpers.length)*Math.PI*2-Math.PI/2;
+        tx=target.x+Math.cos(angle)*22; ty=target.y+Math.sin(angle)*18; repairRange=28;
+      } else {
+        // Spread bunker repairers along the bunker face. They do not need to
+        // occupy the same point to contribute their repair beam.
+        const crew=world.repairBots.filter(other=>other.target===target);
+        const slot=Math.max(0,crew.indexOf(bot)),count=Math.max(1,crew.length);
+        const usable=Math.max(28,target.w-24);
+        tx=target.x+target.w/2+(slot-(count-1)/2)*(usable/Math.max(1,count-1));
+        tx=clamp(tx,target.x+10,target.x+target.w-10);
+        ty=target.y-16; repairRange=34;
+      }
       const dx=tx-bot.x,dy=ty-bot.y,d=Math.hypot(dx,dy),move=Math.min(d,260*dt);
       if(d>1){bot.x+=dx/d*move;bot.y+=dy/d*move;}
-      if(d<24&&target.hp<target.maxHp){target.hp=Math.min(target.maxHp,target.hp+0.575*dt);target.healT=0.12;}
+      if(d<repairRange&&target.hp<target.maxHp){target.hp=Math.min(target.maxHp,target.hp+0.575*dt);target.healT=0.12;}
     });
   }
 
