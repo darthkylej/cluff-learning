@@ -931,7 +931,7 @@ const shipItems=[
   { id:'shield', icon:'🛡', name:'Shield Generator', desc:'+1 shield per level', base:260, step:1.45 },
   { id:'speed',  icon:'🚀', name:'Thrusters',        desc:'+100 px/s movement',  base:200, step:1.45 },
 ];
-const REPAIR_BOT_COST=350;
+const REPAIR_BOT_COST=1200;
 const missileItems=[
   { id:'missS', icon:'🧨', name:'Small Missile',  desc:'Blast radius 60',  cost:200 },
   { id:'missM', icon:'🚀', name:'Medium Missile', desc:'Blast radius 90',  cost:500 },
@@ -1078,7 +1078,7 @@ function renderShop(){
       if(state.bankCredits<REPAIR_BOT_COST){ SFX.wrong(); return; }
       state.bankCredits-=REPAIR_BOT_COST; state.loadout.repairBots=(state.loadout.repairBots|0)+1;
       SFX.buy(); flashTag('shopCredits',true); renderShop(); PROGRESS.save();
-    },'<div class="tiny" style="color:var(--cyan)">No purchase limit · '+bots+' active next battle</div>'));
+    },'<div class="tiny" style="color:var(--cyan)">Costs about one strong round of spelling · '+bots+' active next battle</div>'));
     missileItems.forEach(it=>{
       const M=state.loadout.missiles||{small:0,medium:0,heavy:0};
       const have=it.id==='missS'?M.small:it.id==='missM'?M.medium:M.heavy;
