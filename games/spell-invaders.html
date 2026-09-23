@@ -1338,7 +1338,7 @@ function startBattle(){
   }
   const bw=120,bh=30,bhp=18,gap=(canvas.width-4*bw)/5;
   for(let i=0;i<4;i++) world.buildings.push(makeBuilding(gap+i*(bw+gap),canvas.height-166,bw,bh,bhp));
-  for(let i=0;i<(state.loadout.repairBots|0);i++) world.repairBots.push({x:p.x+p.w/2,y:p.y-18,target:null,phase:i*0.7});
+  for(let i=0;i<(state.loadout.repairBots|0);i++) world.repairBots.push({x:p.x+p.w/2,y:p.y-18,w:18,h:14,hp:3,maxHp:3,target:null,phase:i*0.7,healT:0});
 
   show('battle'); startLoop();
 }
@@ -1589,13 +1589,20 @@ function update(dt,keys){
   });
   world.drones=world.drones.filter(d=>!d.dead);
 
-  if(world.repairBots.length&&world.buildings.length){
-    let target=null,worst=1;
-    world.buildings.forEach(g=>{ const pct=g.hp/g.maxHp; if(g.hp<g.maxHp&&pct<worst){worst=pct;target=g;} });
+  if(world.repairBots.length){
+    // Bots prioritize damaged teammates before bunkers. All healthy bots stack
+    // their repair beams on the same target, so larger crews repair faster.
+    let targetBot=null,worstBot=1;
+    world.repairBots.forEach(b=>{ const pct=b.hp/b.maxHp; if(b.hp>0&&b.hp<b.maxHp&&pct<worstBot){worstBot=pct;targetBot=b;} });
+    let targetBuilding=null,worstBuilding=1;
+    if(!targetBot) world.buildings.forEach(g=>{ const pct=g.hp/g.maxHp; if(g.hp<g.maxHp&&pct<worstBuilding){worstBuilding=pct;targetBuilding=g;} });
     world.repairBots.forEach((bot,i)=>{
+      const target=targetBot&&targetBot!==bot?targetBot:(!targetBot?targetBuilding:null);
       bot.target=target;
       if(!target){ bot.x+=(p.x+p.w/2+(i-(world.repairBots.length-1)/2)*9-bot.x)*Math.min(1,dt*3); bot.y+=(p.y-22-bot.y)*Math.min(1,dt*3); return; }
-      const tx=target.x+target.w/2+(i-(world.repairBots.length-1)/2)*Math.min(8,60/Math.max(1,world.repairBots.length)),ty=target.y-16;
+      const isBot=target.maxHp===3&&target.w===18;
+      const tx=(isBot?target.x:target.x+target.w/2)+(i-(world.repairBots.length-1)/2)*Math.min(8,60/Math.max(1,world.repairBots.length));
+      const ty=isBot?target.y-12:target.y-16;
       const dx=tx-bot.x,dy=ty-bot.y,d=Math.hypot(dx,dy),move=Math.min(d,260*dt);
       if(d>1){bot.x+=dx/d*move;bot.y+=dy/d*move;}
       if(d<24&&target.hp<target.maxHp){target.hp=Math.min(target.maxHp,target.hp+1.15*dt);target.healT=0.12;}
@@ -1667,6 +1674,14 @@ function update(dt,keys){
   world.powerups=world.powerups.filter(pu=>!pu.dead);
 
   world.enemyBullets.forEach(b=>{
+    for(const bot of world.repairBots){
+      if(bot.hp>0&&aabb(b,{x:bot.x-9,y:bot.y-7,w:18,h:14})){
+        b.dead=true; bot.hp=Math.max(0,bot.hp-1); bot.healT=0;
+        SFX.hit(); floatText(bot.hp>0?'🔧 '+bot.hp+'/'+bot.maxHp:'💥 REPAIR BOT LOST',bot.x,bot.y-12,bot.hp>0?'#ffd166':'#ff6b6b');
+        if(bot.hp<=0) spawnExplosion(bot.x,bot.y,20);
+        return;
+      }
+    }
     for(const g of world.buildings){
       if(g.hp>0&&aabb(b,g)){ b.dead=true; g.hp=Math.max(0,g.hp-1); SFX.hitBunker(); return; }
     }
@@ -1703,6 +1718,8 @@ function update(dt,keys){
   });
   world.explosions=world.explosions.filter(ex=>ex.t<ex.dur);
   world.buildings.forEach(g=>{ if(g.healT>0) g.healT-=dt; });
+  world.repairBots.forEach(b=>{ if(b.healT>0) b.healT-=dt; });
+  world.repairBots=world.repairBots.filter(b=>b.hp>0);
   if(world.banner){ world.banner.t+=dt; if(world.banner.t>world.banner.life) world.banner=null; }
 
   if(world.enemies.length===0) world.win=true;
@@ -1997,7 +2014,8 @@ function draw(){
   world.repairBots.forEach((b,i)=>{
     ctx.save();ctx.translate(b.x,b.y+Math.sin(t*5+b.phase)*2);
     ctx.fillStyle='rgba(125,255,106,.16)';ctx.beginPath();ctx.arc(0,0,11,0,6.283);ctx.fill();
-    ctx.fillStyle='#7dff6a';ctx.fillRect(-6,-4,12,8);ctx.fillStyle='#eaffdf';ctx.fillRect(-2,-7,4,4);
+    ctx.fillStyle=b.healT>0?'#d8ffd0':'#7dff6a';ctx.fillRect(-6,-4,12,8);ctx.fillStyle='#eaffdf';ctx.fillRect(-2,-7,4,4);
+    ctx.fillStyle='#0b0f18';ctx.fillRect(-8,-12,16,2);ctx.fillStyle=b.hp<=1?'#ff6b6b':'#7dff6a';ctx.fillRect(-8,-12,16*(b.hp/b.maxHp),2);
     if(b.target){ctx.strokeStyle='rgba(125,255,106,'+(0.45+0.35*Math.sin(t*12+i))+')';ctx.beginPath();ctx.moveTo(0,7);ctx.lineTo(0,15);ctx.stroke();}
     ctx.restore();
   });
