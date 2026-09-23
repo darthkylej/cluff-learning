@@ -267,7 +267,7 @@
       <ul class="clean tiny">
         <li><strong>🔤 Spelling:</strong> Hear the word with 🔊, type it, press <span class="kbd">Enter</span>. 12 words a level. Miss one and you retype it (no credits for corrections).</li>
         <li><strong>💰 Credits:</strong> +100 a word · +50 every 3-streak · <span style="color:var(--lime)">+500 perfect round</span> · plus bonuses from golden UFOs and smart aliens.</li>
-        <li><strong>🔫 Arsenal:</strong> Buy weapons in the Market, then <strong>equip one</strong> before each mission. Every weapon upgrades to Level 5. Elite guns take several rounds of saving — and you keep them forever, even after a defeat.</li>
+        <li><strong>🔫 Arsenal:</strong> Buy weapons in the Market, then <strong>equip one</strong> before each mission. Upgrade each weapon stat separately with no level cap. Elite guns take several rounds of saving — and you keep them forever, even after a defeat.</li>
         <li><strong>🚀 Battle:</strong> <span class="kbd">A</span>/<span class="kbd">D</span> move · <span class="kbd">Space</span> fire · <span class="kbd">Q</span> alt-fire · <span class="kbd">Shift</span> missile · <span class="kbd">R</span> reload.</li>
         <li><strong>😈 Smart aliens:</strong> Sometimes one breaks formation, dodges your shots and hunts you. Kill it for a rare power-up and bonus credits.</li>
         <li><strong>👑 Boss:</strong> Every 5th level the Mothership arrives — and it gets angrier at half health.</li>
@@ -684,24 +684,48 @@ const WEAPONS=[
 const WEAPON_BY_ID={}; WEAPONS.forEach(w=>{ WEAPON_BY_ID[w.id]=w; });
 const TIER_NAME={1:'Standard',2:'Tactical',3:'Specialist',4:'Elite'};
 
-function weaponAtLevel(id,lv){
-  const b=WEAPON_BY_ID[id]; if(!b) return null;
-  lv=clamp(lv|0,1,5); const k=lv-1;
-  const w=Object.assign({},b);
-  w.level=lv;
-  w.dmg=+(b.dmg*(1+0.20*k)).toFixed(2);
-  w.mag=Math.max(1,Math.round(b.mag*(1+0.14*k)));
-  w.reload=+(b.reload*(1-0.09*k)).toFixed(2);
-  w.gap=+(b.gap*(1-0.07*k)).toFixed(3);
-  w.speed=Math.round(b.speed*(1+0.05*k));
-  if(b.explode) w.explode={r:Math.round(b.explode.r*(1+0.09*k)), dmg:+(b.explode.dmg*(1+0.18*k)).toFixed(2)};
-  if(b.chain) w.chain={jumps:b.chain.jumps+(lv>=4?1:0), range:b.chain.range+10*k, dmg:+(b.chain.dmg*(1+0.18*k)).toFixed(2)};
-  if(b.alt){ w.alt=Object.assign({},b.alt); w.alt.cd=+(b.alt.cd*(1-0.06*k)).toFixed(2); }
-  return w;
+const WEAPON_UPGRADE_STATS=[
+  { id:'damage', label:'Damage', icon:'💥' },
+  { id:'rate', label:'Fire Rate', icon:'⚡' },
+  { id:'magazine', label:'Magazine', icon:'📦' },
+  { id:'reload', label:'Reload Speed', icon:'⏱' },
+  { id:'velocity', label:'Velocity', icon:'➤' },
+];
+function freshWeaponUpgrades(){ return {damage:0,rate:0,magazine:0,reload:0,velocity:0}; }
+function normalizeWeaponUpgrades(v){
+  if(v&&typeof v==='object'){
+    const out=freshWeaponUpgrades();
+    WEAPON_UPGRADE_STATS.forEach(a=>out[a.id]=Math.max(0,Math.floor(Number(v[a.id])||0)));
+    return out;
+  }
+  // Legacy saves stored one weapon level from 1-5. Preserve that investment by
+  // applying the old number of upgrades to every independently upgradeable stat.
+  const legacy=Math.max(0,(Number(v)||1)-1), out=freshWeaponUpgrades();
+  WEAPON_UPGRADE_STATS.forEach(a=>out[a.id]=legacy);
+  return out;
 }
-function upgradeCost(id,lv){
+function weaponUpgrades(id){ return normalizeWeaponUpgrades(state.arsenal[id]); }
+function weaponUpgradeCost(id,attr,lv){
   const b=WEAPON_BY_ID[id]; if(!b) return Infinity;
-  return Math.round(Math.max(400,b.cost||400)*0.5*Math.pow(1.55,lv-1));
+  const base=Math.max(400,b.cost||400);
+  // Quadratic growth stays finite and gives every attribute unlimited levels.
+  return Math.round(base*(0.28+0.10*lv+0.018*lv*lv));
+}
+function weaponAtLevel(id,levels){
+  const b=WEAPON_BY_ID[id]; if(!b) return null;
+  const u=normalizeWeaponUpgrades(levels), w=Object.assign({},b);
+  w.upgrades=u;
+  w.dmg=+(b.dmg*(1+0.10*u.damage)).toFixed(2);
+  w.gap=+(b.gap/(1+0.08*u.rate)).toFixed(3);
+  w.mag=Math.max(1,Math.round(b.mag+u.magazine));
+  w.reload=+(b.reload/(1+0.07*u.reload)).toFixed(2);
+  w.speed=Math.round(b.speed*(1+0.06*u.velocity));
+  // Special weapon behavior remains intrinsic to the weapon. Damage-based
+  // secondary effects scale with Damage so that upgrade remains meaningful.
+  if(b.explode) w.explode={r:b.explode.r, dmg:+(b.explode.dmg*(1+0.10*u.damage)).toFixed(2)};
+  if(b.chain) w.chain={jumps:b.chain.jumps, range:b.chain.range, dmg:+(b.chain.dmg*(1+0.10*u.damage)).toFixed(2)};
+  if(b.alt) w.alt=Object.assign({},b.alt);
+  return w;
 }
 
 /* ============ powerups ============ */
@@ -726,7 +750,7 @@ let level=1;
 const state={
   words:[], idx:0, correct:0, streak:0,
   credits:0, roundEarnings:0, bankCredits:0, mustCorrect:false, wordResults:[],
-  arsenal:{ pulse:1 }, equipped:'pulse',
+  arsenal:{ pulse:{damage:0,rate:0,magazine:0,reload:0,velocity:0} }, equipped:'pulse',
   loadout:{ shieldsLv:0, speedLv:0, hullLv:0, missiles:{small:0,medium:0,heavy:0} },
   battleResult:null
 };
@@ -941,17 +965,17 @@ function weaponTraits(w){
   return t.length?'<div class="tiny" style="color:var(--cyan)">'+t.join(' · ')+'</div>':'';
 }
 function makeWeaponCard(id,owned){
-  const lv=owned?(state.arsenal[id]|0):1;
-  const w=weaponAtLevel(id,lv), base=WEAPON_BY_ID[id];
+  const upgrades=owned?weaponUpgrades(id):freshWeaponUpgrades();
+  const w=weaponAtLevel(id,upgrades), base=WEAPON_BY_ID[id];
   const card=document.createElement('div');
   card.className='wcard'+(owned&&state.equipped===id?' equipped':'');
   card.innerHTML=
     '<div class="wtop"><div class="wicon">'+base.icon+'</div><div>'+
-      '<div class="wname">'+base.name+(owned?' <span class="tiny" style="color:var(--lime)">Lv '+lv+'</span>':'')+'</div>'+
+      '<div class="wname">'+base.name+'</div>'+
       '<div class="wtier t'+base.tier+'c">'+TIER_NAME[base.tier]+'</div></div></div>'+
     '<div class="wdesc">'+base.desc+'</div>'+weaponTraits(w)+weaponStatBlock(w)+
     (base.alt?'<div class="walt">✨ '+base.alt.name+' — '+base.alt.desc+'</div>':'')+
-    (owned?'<div class="pips">'+Array.from({length:5},(_,i)=>'<div class="pip '+(i<lv?'on':'')+'"></div>').join('')+'</div>'
+    (owned?'<div class="tiny muted" style="margin-top:8px">Upgrade any stat independently. No maximum level.</div>'
           :'<div class="price">💰 '+base.cost+'</div>');
   const btns=document.createElement('div'); btns.className='wbtns';
   if(owned){
@@ -961,21 +985,24 @@ function makeWeaponCard(id,owned){
     eq.disabled=state.equipped===id;
     eq.onclick=()=>{ state.equipped=id; SFX.equip(); renderShop(); PROGRESS.save(); };
     btns.appendChild(eq);
-    if(lv<5){
-      const cost=upgradeCost(id,lv);
+    const upgradesBox=document.createElement('div');
+    upgradesBox.style.cssText='display:grid;grid-template-columns:1fr;gap:5px;margin-top:8px;width:100%';
+    WEAPON_UPGRADE_STATS.forEach(attr=>{
+      const lv=upgrades[attr.id]|0, cost=weaponUpgradeCost(id,attr.id,lv);
       const up=document.createElement('button');
-      up.textContent='Lv '+(lv+1)+' · '+cost;
+      up.textContent=attr.icon+' '+attr.label+' Lv '+lv+' → '+(lv+1)+' · '+cost;
       if(state.bankCredits>=cost) up.className='gold';
       up.disabled=state.bankCredits<cost;
       up.onclick=()=>{
         if(state.bankCredits<cost){ SFX.wrong(); return; }
-        state.bankCredits-=cost; state.arsenal[id]=lv+1; SFX.buy();
+        state.bankCredits-=cost;
+        const next=weaponUpgrades(id); next[attr.id]=(next[attr.id]|0)+1;
+        state.arsenal[id]=next; SFX.buy();
         flashTag('shopCredits',true); renderShop(); PROGRESS.save();
       };
-      btns.appendChild(up);
-    } else {
-      const m=document.createElement('button'); m.textContent='★ Max'; m.disabled=true; btns.appendChild(m);
-    }
+      upgradesBox.appendChild(up);
+    });
+    card.appendChild(upgradesBox);
   } else {
     const afford=state.bankCredits>=base.cost;
     const buy=document.createElement('button');
@@ -984,7 +1011,7 @@ function makeWeaponCard(id,owned){
     buy.disabled=!afford;
     buy.onclick=()=>{
       if(state.bankCredits<base.cost){ SFX.wrong(); return; }
-      state.bankCredits-=base.cost; state.arsenal[id]=1; state.equipped=id;
+      state.bankCredits-=base.cost; state.arsenal[id]=freshWeaponUpgrades(); state.equipped=id;
       SFX.buy(); shopTab='arsenal'; syncTabs(); renderShop(); PROGRESS.save();
     };
     btns.appendChild(buy);
@@ -1010,7 +1037,7 @@ function renderShop(){
   document.getElementById('shopCredits').textContent=state.bankCredits;
   document.getElementById('shopLevel').textContent=level;
   const eqW=WEAPON_BY_ID[state.equipped];
-  document.getElementById('equippedName').textContent=eqW?(eqW.name+' Lv'+(state.arsenal[state.equipped]|0)):'—';
+  document.getElementById('equippedName').textContent=eqW?eqW.name:'—';
 
   if(shopTab==='arsenal'){
     const owned=WEAPONS.filter(w=>state.arsenal[w.id]);
@@ -1026,7 +1053,7 @@ function renderShop(){
       .forEach(w=>grid.appendChild(makeWeaponCard(w.id,false)));
     if(!grid.children.length){
       const c=document.createElement('div'); c.className='card';
-      c.innerHTML='<h3>Sold out</h3><div class="tiny muted">You own every weapon in the game. Go max them all out.</div>';
+      c.innerHTML='<h3>Sold out</h3><div class="tiny muted">You own every weapon in the game. Keep upgrading the individual stats in My Arsenal — there is no maximum level.</div>';
       grid.appendChild(c);
     }
   } else {
@@ -1087,7 +1114,7 @@ function spawnExplosion(cx,cy,size,big){
 
 function makePlayer(){
   const L=state.loadout;
-  const w=weaponAtLevel(state.equipped,state.arsenal[state.equipped]||1)||weaponAtLevel('pulse',1);
+  const w=weaponAtLevel(state.equipped,state.arsenal[state.equipped])||weaponAtLevel('pulse',freshWeaponUpgrades());
   const maxHp=3+(L.hullLv|0);
   return { x:0,y:0,w:40,h:26,
     speed:100+(L.speedLv|0)*100, vx:0,
@@ -1278,7 +1305,7 @@ function startBattle(){
   document.getElementById('battleLevel').textContent=level;
   document.getElementById('hpReadout').textContent=p.hp;
   document.getElementById('shieldReadout').textContent=p.shields;
-  document.getElementById('weaponName').textContent=p.W.name+' Lv'+p.W.level;
+  document.getElementById('weaponName').textContent=p.W.name;
   document.getElementById('missileReadout').textContent=(p.missiles.small|0)+(p.missiles.medium|0)+(p.missiles.heavy|0);
   document.getElementById('reloadReadout').textContent='0.0s';
   updateAmmoHUD(p); updateAltHUD(p);
@@ -2080,7 +2107,7 @@ function endBattle(win){
     '<div class="stat-row"><span class="muted">Round earnings</span><b>'+state.battleResult.roundEarnings+'</b></div>'+
     (bonus?'<div class="stat-row"><span class="muted">Battlefield bonuses</span><b>+'+bonus+'</b></div>':'')+
     '<div class="stat-row"><span class="muted">Bank</span><b>'+state.bankCredits+'</b></div>'+
-    '<div class="stat-row"><span class="muted">Weapon</span><b>'+(W?W.name:'—')+' Lv'+(state.arsenal[state.equipped]|0)+'</b></div>'+
+    '<div class="stat-row"><span class="muted">Weapon</span><b>'+(W?W.name:'—')+'</b></div>'+
     '<div class="stat-row"><span class="muted">Arsenal</span><b>'+owned+'/'+WEAPONS.length+' owned</b></div>'+
     '<div class="spacer"></div><div class="tiny muted">Ship: ❤️'+(L.hullLv|0)+' 🛡'+(L.shieldsLv|0)+' 🚀'+(L.speedLv|0)+
     ' · Missiles S/M/H '+(M.small|0)+'/'+(M.medium|0)+'/'+(M.heavy|0)+
@@ -2187,7 +2214,9 @@ const PROGRESS=(function(){
     const s=r.state||{};
     if(s.bank!==undefined) state.bankCredits=s.bank|0;
     if(s.arsenal&&Object.keys(s.arsenal).length) state.arsenal=s.arsenal;
-    if(!state.arsenal.pulse) state.arsenal.pulse=1;
+    if(!state.arsenal.pulse) state.arsenal.pulse=freshWeaponUpgrades();
+    // Migrate legacy whole-weapon levels to the new per-attribute model.
+    Object.keys(state.arsenal).forEach(id=>{ state.arsenal[id]=normalizeWeaponUpgrades(state.arsenal[id]); });
     state.equipped=(s.equipped&&state.arsenal[s.equipped])?s.equipped:'pulse';
     if(s.loadout){
       state.loadout={
