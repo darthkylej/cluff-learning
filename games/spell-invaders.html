@@ -1305,7 +1305,7 @@ function startBattle(){
     ufo:null, ufoTimer:randRange(9,15), crateTimer:randRange(14,22),
     smartTimer:randRange(9,16), smartAlive:0, maxSmart:(level>=8?2:1),
     enemyDir:1, enemySpeed:34*mult, enemyStepDown:14,
-    bossSummonTimer:isBoss?60:0,
+    bossSummonTimer:isBoss?30:0,
     bounds:{left:16,right:canvas.width-16},
     win:false, lose:false, time:0, isBoss, bonusCredits:0, banner:null
   };
@@ -1486,7 +1486,7 @@ function update(dt,keys){
   if(world.isBoss&&world.enemies[0]&&world.enemies[0].boss){
     const B=world.enemies[0];
 
-    // Boss reinforcements: summon one ordinary alien every 60 seconds.
+    // Boss reinforcements: summon one ordinary alien every 30 seconds.
     world.bossSummonTimer-=dt;
     if(world.bossSummonTimer<=0){
       const hp=5+Math.floor(level/4);
@@ -1495,7 +1495,7 @@ function update(dt,keys){
         B.y+B.h+24,hp,clamp(randRange(2.5/mult,3.8/mult),0.35,10),Math.floor(Math.random()*3));
       e.escort=true;
       world.enemies.push(e);
-      world.bossSummonTimer+=60;
+      world.bossSummonTimer+=30;
       banner('👾  REINFORCEMENT INCOMING','#ff8b9a');
       SFX.alert();
     }
