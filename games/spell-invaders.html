@@ -1590,22 +1590,40 @@ function update(dt,keys){
   world.drones=world.drones.filter(d=>!d.dead);
 
   if(world.repairBots.length){
-    // Bots prioritize damaged teammates before bunkers. All healthy bots stack
-    // their repair beams on the same target, so larger crews repair faster.
-    let targetBot=null,worstBot=1;
-    world.repairBots.forEach(b=>{ const pct=b.hp/b.maxHp; if(b.hp>0&&b.hp<b.maxHp&&pct<worstBot){worstBot=pct;targetBot=b;} });
-    let targetBuilding=null,worstBuilding=1;
-    if(!targetBot) world.buildings.forEach(g=>{ const pct=g.hp/g.maxHp; if(g.hp<g.maxHp&&pct<worstBuilding){worstBuilding=pct;targetBuilding=g;} });
+    // A damaged teammate has first priority. Otherwise each bot repairs its
+    // nearest damaged bunker. Idle bots shelter beneath their nearest bunker.
     world.repairBots.forEach((bot,i)=>{
-      const target=targetBot&&targetBot!==bot?targetBot:(!targetBot?targetBuilding:null);
+      let targetBot=null,botDist=Infinity;
+      world.repairBots.forEach(other=>{
+        if(other===bot||other.hp<=0||other.hp>=other.maxHp) return;
+        const d=dist(bot.x,bot.y,other.x,other.y);
+        if(d<botDist){botDist=d;targetBot=other;}
+      });
+      let targetBuilding=null,buildingDist=Infinity;
+      if(!targetBot) world.buildings.forEach(g=>{
+        if(g.hp>=g.maxHp) return;
+        const d=dist(bot.x,bot.y,g.x+g.w/2,g.y+g.h/2);
+        if(d<buildingDist){buildingDist=d;targetBuilding=g;}
+      });
+      const target=targetBot||targetBuilding;
       bot.target=target;
-      if(!target){ bot.x+=(p.x+p.w/2+(i-(world.repairBots.length-1)/2)*9-bot.x)*Math.min(1,dt*3); bot.y+=(p.y-22-bot.y)*Math.min(1,dt*3); return; }
+      if(!target){
+        let shelter=null,shelterDist=Infinity;
+        world.buildings.forEach(g=>{
+          const d=dist(bot.x,bot.y,g.x+g.w/2,g.y+g.h/2);
+          if(d<shelterDist){shelterDist=d;shelter=g;}
+        });
+        if(shelter){
+          const tx=shelter.x+shelter.w/2+(i%5-2)*7,ty=shelter.y+shelter.h-5;
+          bot.x+=(tx-bot.x)*Math.min(1,dt*3);bot.y+=(ty-bot.y)*Math.min(1,dt*3);
+        }
+        return;
+      }
       const isBot=target.maxHp===3&&target.w===18;
-      const tx=(isBot?target.x:target.x+target.w/2)+(i-(world.repairBots.length-1)/2)*Math.min(8,60/Math.max(1,world.repairBots.length));
-      const ty=isBot?target.y-12:target.y-16;
+      const tx=isBot?target.x:target.x+target.w/2,ty=isBot?target.y-12:target.y-16;
       const dx=tx-bot.x,dy=ty-bot.y,d=Math.hypot(dx,dy),move=Math.min(d,260*dt);
       if(d>1){bot.x+=dx/d*move;bot.y+=dy/d*move;}
-      if(d<24&&target.hp<target.maxHp){target.hp=Math.min(target.maxHp,target.hp+1.15*dt);target.healT=0.12;}
+      if(d<24&&target.hp<target.maxHp){target.hp=Math.min(target.maxHp,target.hp+0.575*dt);target.healT=0.12;}
     });
   }
 
@@ -1719,7 +1737,12 @@ function update(dt,keys){
   world.explosions=world.explosions.filter(ex=>ex.t<ex.dur);
   world.buildings.forEach(g=>{ if(g.healT>0) g.healT-=dt; });
   world.repairBots.forEach(b=>{ if(b.healT>0) b.healT-=dt; });
-  world.repairBots=world.repairBots.filter(b=>b.hp>0);
+  const survivingRepairBots=world.repairBots.filter(b=>b.hp>0);
+  if(survivingRepairBots.length!==world.repairBots.length){
+    world.repairBots=survivingRepairBots;
+    state.loadout.repairBots=world.repairBots.length;
+    PROGRESS.save();
+  } else world.repairBots=survivingRepairBots;
   if(world.banner){ world.banner.t+=dt; if(world.banner.t>world.banner.life) world.banner=null; }
 
   if(world.enemies.length===0) world.win=true;
@@ -2142,6 +2165,7 @@ function endBattle(win){
   if(win&&world&&world.player){
     const pm=world.player.missiles||{small:0,medium:0,heavy:0};
     state.loadout.missiles={small:pm.small|0,medium:pm.medium|0,heavy:pm.heavy|0};
+    state.loadout.repairBots=world.repairBots.filter(b=>b.hp>0).length;
   }
   const bonus=world?(world.bonusCredits|0):0;
   const wasBoss=world?world.isBoss:false;
