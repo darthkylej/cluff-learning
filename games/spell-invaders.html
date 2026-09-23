@@ -751,11 +751,11 @@ const state={
   words:[], idx:0, correct:0, streak:0,
   credits:0, roundEarnings:0, bankCredits:0, mustCorrect:false, wordResults:[],
   arsenal:{ pulse:{damage:0,rate:0,magazine:0,reload:0,velocity:0} }, equipped:'pulse',
-  loadout:{ shieldsLv:0, speedLv:0, hullLv:0, missiles:{small:0,medium:0,heavy:0} },
+  loadout:{ shieldsLv:0, speedLv:0, hullLv:0, repairBots:0, missiles:{small:0,medium:0,heavy:0} },
   battleResult:null
 };
 window.state=state;
-function resetShipSystems(){ state.loadout={ shieldsLv:0, speedLv:0, hullLv:0, missiles:{small:0,medium:0,heavy:0} }; }
+function resetShipSystems(){ state.loadout={ shieldsLv:0, speedLv:0, hullLv:0, repairBots:0, missiles:{small:0,medium:0,heavy:0} }; }
 function resetRoundStats(){
   state.words=[]; state.idx=0; state.correct=0; state.streak=0;
   state.credits=0; state.roundEarnings=0; state.mustCorrect=false; state.wordResults=[];
@@ -931,6 +931,7 @@ const shipItems=[
   { id:'shield', icon:'🛡', name:'Shield Generator', desc:'+1 shield per level', base:260, step:1.45 },
   { id:'speed',  icon:'🚀', name:'Thrusters',        desc:'+100 px/s movement',  base:200, step:1.45 },
 ];
+const REPAIR_BOT_COST=350;
 const missileItems=[
   { id:'missS', icon:'🧨', name:'Small Missile',  desc:'Blast radius 60',  cost:200 },
   { id:'missM', icon:'🚀', name:'Medium Missile', desc:'Blast radius 90',  cost:500 },
@@ -1072,6 +1073,12 @@ function renderShop(){
           SFX.buy(); flashTag('shopCredits',true); renderShop(); PROGRESS.save();
         },pips));
     });
+    const bots=state.loadout.repairBots|0, canBuyBot=state.bankCredits>=REPAIR_BOT_COST;
+    grid.appendChild(makeSimpleCard('🔧','Repair Bot x'+bots,'Flies to the most damaged surviving bunker and repairs it. More bots repair faster.','💰 '+REPAIR_BOT_COST,canBuyBot?'Buy another':('Need '+(REPAIR_BOT_COST-state.bankCredits)+' more'),canBuyBot,()=>{
+      if(state.bankCredits<REPAIR_BOT_COST){ SFX.wrong(); return; }
+      state.bankCredits-=REPAIR_BOT_COST; state.loadout.repairBots=(state.loadout.repairBots|0)+1;
+      SFX.buy(); flashTag('shopCredits',true); renderShop(); PROGRESS.save();
+    },'<div class="tiny" style="color:var(--cyan)">No purchase limit · '+bots+' active next battle</div>'));
     missileItems.forEach(it=>{
       const M=state.loadout.missiles||{small:0,medium:0,heavy:0};
       const have=it.id==='missS'?M.small:it.id==='missM'?M.medium:M.heavy;
@@ -1081,6 +1088,7 @@ function renderShop(){
           if(state.bankCredits<it.cost){ SFX.wrong(); return; }
           state.bankCredits-=it.cost;
           if(!state.loadout.missiles) state.loadout.missiles={small:0,medium:0,heavy:0};
+    state.loadout.repairBots=Math.max(0,state.loadout.repairBots|0);
           if(it.id==='missS') state.loadout.missiles.small++;
           if(it.id==='missM') state.loadout.missiles.medium++;
           if(it.id==='missH') state.loadout.missiles.heavy++;
@@ -1292,7 +1300,7 @@ function startBattle(){
   world={
     player:makePlayer(),
     bullets:[],missiles:[],enemyBullets:[],enemies:[],buildings:[],
-    explosions:[],floaters:[],powerups:[],arcs:[],webs:[],novas:[],drones:[],
+    explosions:[],floaters:[],powerups:[],arcs:[],webs:[],novas:[],drones:[],repairBots:[],
     ufo:null, ufoTimer:randRange(9,15), crateTimer:randRange(14,22),
     smartTimer:randRange(9,16), smartAlive:0, maxSmart:(level>=8?2:1),
     enemyDir:1, enemySpeed:34*mult, enemyStepDown:14,
@@ -1330,6 +1338,7 @@ function startBattle(){
   }
   const bw=120,bh=30,bhp=18,gap=(canvas.width-4*bw)/5;
   for(let i=0;i<4;i++) world.buildings.push(makeBuilding(gap+i*(bw+gap),canvas.height-166,bw,bh,bhp));
+  for(let i=0;i<(state.loadout.repairBots|0);i++) world.repairBots.push({x:p.x+p.w/2,y:p.y-18,target:null,phase:i*0.7});
 
   show('battle'); startLoop();
 }
@@ -1579,6 +1588,19 @@ function update(dt,keys){
     if(d.t>d.dur) d.dead=true;
   });
   world.drones=world.drones.filter(d=>!d.dead);
+
+  if(world.repairBots.length&&world.buildings.length){
+    let target=null,worst=1;
+    world.buildings.forEach(g=>{ const pct=g.hp/g.maxHp; if(g.hp<g.maxHp&&pct<worst){worst=pct;target=g;} });
+    world.repairBots.forEach((bot,i)=>{
+      bot.target=target;
+      if(!target){ bot.x+=(p.x+p.w/2+(i-(world.repairBots.length-1)/2)*9-bot.x)*Math.min(1,dt*3); bot.y+=(p.y-22-bot.y)*Math.min(1,dt*3); return; }
+      const tx=target.x+target.w/2+(i-(world.repairBots.length-1)/2)*Math.min(8,60/Math.max(1,world.repairBots.length)),ty=target.y-16;
+      const dx=tx-bot.x,dy=ty-bot.y,d=Math.hypot(dx,dy),move=Math.min(d,260*dt);
+      if(d>1){bot.x+=dx/d*move;bot.y+=dy/d*move;}
+      if(d<24&&target.hp<target.maxHp){target.hp=Math.min(target.maxHp,target.hp+1.15*dt);target.healT=0.12;}
+    });
+  }
 
   world.bullets.forEach(b=>{
     if(!b.friendly||b.dead) return;
@@ -1972,6 +1994,14 @@ function draw(){
 
   drawShip(p,t);
 
+  world.repairBots.forEach((b,i)=>{
+    ctx.save();ctx.translate(b.x,b.y+Math.sin(t*5+b.phase)*2);
+    ctx.fillStyle='rgba(125,255,106,.16)';ctx.beginPath();ctx.arc(0,0,11,0,6.283);ctx.fill();
+    ctx.fillStyle='#7dff6a';ctx.fillRect(-6,-4,12,8);ctx.fillStyle='#eaffdf';ctx.fillRect(-2,-7,4,4);
+    if(b.target){ctx.strokeStyle='rgba(125,255,106,'+(0.45+0.35*Math.sin(t*12+i))+')';ctx.beginPath();ctx.moveTo(0,7);ctx.lineTo(0,15);ctx.stroke();}
+    ctx.restore();
+  });
+
   world.drones.forEach(d=>{
     ctx.save(); ctx.translate(d.x,d.y);
     ctx.fillStyle='rgba(77,227,255,.18)'; ctx.beginPath(); ctx.arc(0,0,14,0,6.283); ctx.fill();
@@ -2125,7 +2155,7 @@ function endBattle(win){
     '<div class="stat-row"><span class="muted">Weapon</span><b>'+(W?W.name:'—')+'</b></div>'+
     '<div class="stat-row"><span class="muted">Arsenal</span><b>'+owned+'/'+WEAPONS.length+' owned</b></div>'+
     '<div class="spacer"></div><div class="tiny muted">Ship: ❤️'+(L.hullLv|0)+' 🛡'+(L.shieldsLv|0)+' 🚀'+(L.speedLv|0)+
-    ' · Missiles S/M/H '+(M.small|0)+'/'+(M.medium|0)+'/'+(M.heavy|0)+
+    ' · Repair Bots '+(L.repairBots|0)+' · Missiles S/M/H '+(M.small|0)+'/'+(M.medium|0)+'/'+(M.heavy|0)+
     (win?'':'<br><strong style="color:var(--lime)">Your weapons survived — those are permanent.</strong>')+'</div>';
   show('result');
   PROGRESS.save();
