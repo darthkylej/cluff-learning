@@ -3447,6 +3447,27 @@ async function codingSummarize(env,history,prior){
  const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},body:JSON.stringify({model:env.CODING_MODEL||'claude-sonnet-4-5',max_tokens:1100,system:'Summarize only durable technical facts, architecture, decisions, debugging outcomes, and open issues. Exclude passwords, tokens, personal information, and unverified guesses. Output concise factual notes, not instructions.',messages:[{role:'user',content:'Previous summary:\n'+prior+'\nNew conversation:\n'+text}]})});
  if(!res.ok)throw Error('Summary API '+res.status);const data=await res.json();return (data.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('\n').slice(0,9000)
 }
+async function handleCodingChats(request,env,method,id){
+ return withUser(request,env,async session=>{
+   const userId=session.user_id;
+   if(method==='GET'){
+     const rows=await query(env,'SELECT id,title,messages,updated_at FROM coding_chats WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200',[userId]);
+     return json(request,{chats:rows.rows||[]});
+   }
+   if(method==='DELETE'){
+     const result=await query(env,'DELETE FROM coding_chats WHERE id=$1 AND user_id=$2 RETURNING id',[id,userId]);
+     return json(request,{deleted:!!result.rows?.length});
+   }
+   const body=await request.json().catch(()=>({}));
+   if(!/^[0-9a-f-]{36}$/i.test(String(body.id||'')))return err(request,'Invalid chat ID.',400);
+   if(typeof body.title!=='string'||body.title.length>120||!Array.isArray(body.messages)||body.messages.length>500)return err(request,'Invalid chat data.',400);
+   for(const m of body.messages)if(!['user','assistant'].includes(m.role)||typeof m.content!=='string'||m.content.length>16000)return err(request,'Invalid chat message.',400);
+   const payload=JSON.stringify(body.messages);
+   if(payload.length>4000000)return err(request,'Chat too large.',413);
+   await query(env,`INSERT INTO coding_chats(id,user_id,title,messages,updated_at) VALUES($1,$2,$3,$4::jsonb,NOW()) ON CONFLICT(id) DO UPDATE SET title=EXCLUDED.title,messages=EXCLUDED.messages,updated_at=NOW() WHERE coding_chats.user_id=EXCLUDED.user_id`,[body.id,userId,body.title||'New conversation',payload]);
+   return json(request,{saved:true});
+ });
+}
 async function handleCodingChat(request, env) {
   return withUser(request, env, async session => {
     const membership = await getMembership(env, session.user_id);
@@ -3542,6 +3563,10 @@ export default {
       if (path === '/family/members/feedback-level' && method === 'PATCH') return await handleSetFeedbackLevel(request, env);
       if (path === '/family/leave'          && method === 'POST') return await handleLeaveFamily(request, env);
 
+      if (path === '/coding/chats' && method === 'GET') return await handleCodingChats(request,env,'GET');
+      if (path === '/coding/chats' && method === 'PUT') return await handleCodingChats(request,env,'PUT');
+      const codingDelete=path.match(/^\/coding\/chats\/([0-9a-f-]{36})$/i);
+      if(codingDelete && method==='DELETE')return await handleCodingChats(request,env,'DELETE',codingDelete[1]);
       if (path === '/coding/chat' && method === 'POST') return await handleCodingChat(request, env);
       if (path === '/tools' && method === 'GET') return await handleListTools(request, env);
 
