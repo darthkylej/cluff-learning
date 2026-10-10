@@ -3409,36 +3409,34 @@ function codingRepoFromMessages(messages){
  for(const m of messages){if(m.role!=='user')continue;let match;while((match=pattern.exec(m.content||'')))repo=match[1]+'/'+match[2].replace(/\.git$/,'')}
  return repo;
 }
-async function codingGitHub(repo,path){
- const url='https://api.github.com/repos/'+repo+'/contents/'+path.split('/').map(encodeURIComponent).join('/');
- const res=await fetch(url,{method:'GET',headers:{Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'Cluff-Coding-Helper'}});
- const data=await res.json().catch(()=>({}));
- if(!res.ok){
-   if(path && res.status===404){
-     for(const branch of ['main','master']){
-       const rawUrl='https://raw.githubusercontent.com/'+repo+'/'+branch+'/'+path.split('/').map(encodeURIComponent).join('/');
-       try{
-         const raw=await fetch(rawUrl,{headers:{'User-Agent':'Cluff-Coding-Helper'}});
-         if(raw.ok){
-           const bytes=new Uint8Array(await raw.arrayBuffer());
-           if(bytes.length>120000)throw Error('File exceeds 120 KB');
-           let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-           return {type:'file',size:bytes.length,encoding:'base64',content:btoa(binary),path};
-         }
-       }catch(e){console.error('GitHub raw fallback',String(e))}
-     }
+async function codingGitHub(repo,path,asFile=false){
+ const encoded=path.split('/').map(encodeURIComponent).join('/');
+ if(asFile){
+   for(const branch of ['main','master']){
+     const url='https://raw.githubusercontent.com/'+repo+'/'+branch+'/'+encoded;
+     const res=await fetch(url,{headers:{'User-Agent':'Cluff-Coding-Helper'}});
+     if(res.status===404)continue;
+     if(!res.ok)throw Error('GitHub raw '+res.status+' at '+url);
+     const bytes=new Uint8Array(await res.arrayBuffer());
+     if(bytes.length>120000)throw Error('File exceeds 120 KB');
+     let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+     return {type:'file',size:bytes.length,encoding:'base64',content:btoa(binary),path};
    }
-   throw Error('GitHub '+res.status+' at '+url+': '+(data.message||'request failed'));
+   throw Error('GitHub raw 404: '+repo+'/'+path+' (main/master)');
  }
+ const url='https://api.github.com/repos/'+repo+'/contents/'+encoded;
+ const res=await fetch(url,{headers:{Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'Cluff-Coding-Helper'}});
+ const data=await res.json().catch(()=>({}));
+ if(!res.ok)throw Error('GitHub directory '+res.status+' at '+url+': '+(data.message||'request failed'));
  return data;
 }
 function codingDecode(b64){const bytes=Uint8Array.from(atob(b64.replace(/\s/g,'')),c=>c.charCodeAt(0));return new TextDecoder('utf-8',{fatal:true}).decode(bytes)}
 async function codingTool(repo,name,input){
- if(name==='search_repository_files'){const q=String(input.query||'').trim();if(q.length<2||q.length>100)throw Error('Search phrase must be 2-100 characters');const hits=[];const pending=[''];let visited=0;while(pending.length&&visited<75&&hits.length<35){const dir=pending.shift();let files;try{files=await codingGitHub(repo,dir)}catch{continue}visited++;if(!Array.isArray(files))continue;for(const f of files){if(f.type==='dir'&&!/^(node_modules|vendor|dist|build|\.git)$/i.test(f.name))pending.push(f.path);else if(f.type==='file'&&f.size<75000&&/\.(js|ts|tsx|jsx|html|css|sql|py|json|md|toml|yml|yaml)$/i.test(f.name)){if(f.path.toLowerCase().includes(q.toLowerCase()))hits.push({path:f.path,match:'filename'});else if(visited<75){try{const file=await codingGitHub(repo,f.path);const content=codingDecode(file.content||'');const pos=content.toLowerCase().indexOf(q.toLowerCase());if(pos>=0)hits.push({path:f.path,line:content.slice(0,pos).split('\n').length,excerpt:content.slice(Math.max(0,pos-130),pos+220)})}catch{}}}if(hits.length>=35)break}}return JSON.stringify({hits,partial:pending.length>0||visited>=75})}
+ if(name==='search_repository_files'){const q=String(input.query||'').trim();if(q.length<2||q.length>100)throw Error('Search phrase must be 2-100 characters');const hits=[];const pending=[''];let visited=0;while(pending.length&&visited<75&&hits.length<35){const dir=pending.shift();let files;try{files=await codingGitHub(repo,dir)}catch{continue}visited++;if(!Array.isArray(files))continue;for(const f of files){if(f.type==='dir'&&!/^(node_modules|vendor|dist|build|\.git)$/i.test(f.name))pending.push(f.path);else if(f.type==='file'&&f.size<75000&&/\.(js|ts|tsx|jsx|html|css|sql|py|json|md|toml|yml|yaml)$/i.test(f.name)){if(f.path.toLowerCase().includes(q.toLowerCase()))hits.push({path:f.path,match:'filename'});else if(visited<75){try{const file=await codingGitHub(repo,f.path,true);const content=codingDecode(file.content||'');const pos=content.toLowerCase().indexOf(q.toLowerCase());if(pos>=0)hits.push({path:f.path,line:content.slice(0,pos).split('\n').length,excerpt:content.slice(Math.max(0,pos-130),pos+220)})}catch{}}}if(hits.length>=35)break}}return JSON.stringify({hits,partial:pending.length>0||visited>=75})}
 
  const path=codingPath(input.path||'');
  if(name==='list_repository_files'){const files=await codingGitHub(repo,path);if(!Array.isArray(files))throw Error('Not a directory');return JSON.stringify(files.slice(0,150).map(f=>({path:f.path,type:f.type,size:f.size})))}
- if(name==='read_repository_file'){if(!path)throw Error('File path required');const file=await codingGitHub(repo,path);if(file.type!=='file'||file.size>120000||file.encoding!=='base64')throw Error('File unavailable or exceeds 120 KB');return JSON.stringify({path,content:codingDecode(file.content)})}
+ if(name==='read_repository_file'){if(!path)throw Error('File path required');const file=await codingGitHub(repo,path,true);if(file.type!=='file'||file.size>120000||file.encoding!=='base64')throw Error('File unavailable or exceeds 120 KB');return JSON.stringify({path,content:codingDecode(file.content)})}
  throw Error('Unknown tool');
 }
 async function codingMemory(env,userId,repo){
