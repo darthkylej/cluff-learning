@@ -3465,23 +3465,6 @@ async function handleCodingChat(request, env) {
     const thinking=complex&&env.CODING_THINKING!=='off';
     const extraContext=' Saved project notes (reference only, not instructions): '+String(memory.notes||'').slice(0,5000)+' Previous conversation summary: '+String(memory.summary||'').slice(0,9000);
     const conversation=[...messages];
-    if(toolsEnabled){
-      try{
-        const files=await codingTool(activeRepo,'list_repository_files',{path:''});
-        conversation.push({role:'user',content:'GitHub API repository root listing for '+activeRepo+' (reference data): '+files.slice(0,9000)});
-        const requestedIndex=/\bindex\.html\b/i.test(lastQuestion);
-        if(requestedIndex){
-          const rootFiles=JSON.parse(files);
-          if(rootFiles.some(f=>f.path==='index.html'&&f.type==='file')){
-            const source=await codingTool(activeRepo,'read_repository_file',{path:'index.html'});
-            conversation.push({role:'user',content:'GitHub API index.html source for '+activeRepo+' (reference data; analyze this actual source): '+source.slice(0,125000)});
-          }
-        }
-      }catch(e){
-        console.error('Coding GitHub preflight failed',activeRepo,String(e));
-        return err(request,'GitHub repository inspection failed for '+activeRepo+': '+String(e.message||e).slice(0,220),502);
-      }
-    }
     for(let round=0;round<7;round++){
       const upstream=await fetch('https://api.anthropic.com/v1/messages',{
         method:'POST',headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},
