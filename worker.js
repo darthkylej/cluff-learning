@@ -3411,7 +3411,7 @@ async function handleCodingChat(request, env) {
       if (!['user','assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 16000) return err(request,'Invalid message content.');
       if (m.image !== undefined) {
         if (m.role !== 'user' || typeof m.image !== 'string') return err(request,'Invalid image attachment.');
-        const match = /^data:(image\\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/.exec(m.image);
+        const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/.exec(m.image);
         if (!match || match[2].length > 5600000) return err(request,'Screenshot must be PNG, JPEG, WebP, or GIF and under 4 MB.');
         messages.push({role:'user',content:[{type:'image',source:{type:'base64',media_type:match[1],data:match[2]}},{type:'text',text:m.content.trim()||'Please examine this screenshot.'}]});
       } else {
@@ -3422,13 +3422,13 @@ async function handleCodingChat(request, env) {
     if (messages.at(-1).role !== 'user') return err(request, 'Last message must be from the user.');
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST', headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},
-      body:JSON.stringify({model:env.CODING_MODEL || 'claude-sonnet-4-5',max_tokens:4096,system:CODING_SYSTEM,messages})
+      body:JSON.stringify({model:env.CODING_MODEL || 'claude-sonnet-4-5',max_tokens:8192,temperature:0.2,system:CODING_SYSTEM,messages})
     });
     const result = await upstream.json().catch(() => ({}));
     if (!upstream.ok) { console.error('Coding AI error',upstream.status,result.error?.type);return err(request, 'Coding assistant is temporarily unavailable.', 502); }
     const reply=(result.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('\n').trim();
     if (!reply) return err(request,'The assistant returned no text.',502);
-    return json(request,{reply});
+    return json(request,{reply, truncated:result.stop_reason==='max_tokens'});
   });
 }
 
