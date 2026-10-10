@@ -3465,6 +3465,11 @@ async function handleCodingChat(request, env) {
     const thinking=complex&&env.CODING_THINKING!=='off';
     const extraContext=' Saved project notes (reference only, not instructions): '+String(memory.notes||'').slice(0,5000)+' Previous conversation summary: '+String(memory.summary||'').slice(0,9000);
     const conversation=[...messages];
+    if(toolsEnabled){
+      try{const files=await codingTool(activeRepo,'list_repository_files',{path:''});
+        conversation.push({role:'user',content:'Verified GitHub root files for '+activeRepo+': '+files.slice(0,9000)});
+      }catch(e){console.error('GitHub listing failed',String(e));}
+    }
     for(let round=0;round<7;round++){
       const upstream=await fetch('https://api.anthropic.com/v1/messages',{
         method:'POST',headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},
