@@ -3406,8 +3406,19 @@ async function handleCodingChat(request, env) {
     if (!env.ANTHROPIC_API_KEY) return err(request, 'AI service not configured.', 503);
     const body = await request.json().catch(() => ({}));
     if (!Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 24) return err(request, 'Provide 1–24 messages.');
-    const messages = body.messages.map(m => ({role:m.role, content:m.content}));
-    if (messages.some(m => !['user','assistant'].includes(m.role) || typeof m.content !== 'string' || !m.content.trim() || m.content.length > 16000)) return err(request, 'Invalid message content.');
+    const messages = [];
+    for (const m of body.messages) {
+      if (!['user','assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 16000) return err(request,'Invalid message content.');
+      if (m.image !== undefined) {
+        if (m.role !== 'user' || typeof m.image !== 'string') return err(request,'Invalid image attachment.');
+        const match = /^data:(image\\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/.exec(m.image);
+        if (!match || match[2].length > 5600000) return err(request,'Screenshot must be PNG, JPEG, WebP, or GIF and under 4 MB.');
+        messages.push({role:'user',content:[{type:'image',source:{type:'base64',media_type:match[1],data:match[2]}},{type:'text',text:m.content.trim()||'Please examine this screenshot.'}]});
+      } else {
+        if (!m.content.trim()) return err(request,'Empty message.');
+        messages.push({role:m.role,content:m.content});
+      }
+    }
     if (messages.at(-1).role !== 'user') return err(request, 'Last message must be from the user.');
     const upstream = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST', headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},
