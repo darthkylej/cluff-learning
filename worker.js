@@ -3413,7 +3413,23 @@ async function codingGitHub(repo,path){
  const url='https://api.github.com/repos/'+repo+'/contents/'+path.split('/').map(encodeURIComponent).join('/');
  const res=await fetch(url,{method:'GET',headers:{Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'Cluff-Coding-Helper'}});
  const data=await res.json().catch(()=>({}));
- if(!res.ok)throw Error('GitHub '+res.status+': '+(data.message||'request failed'));
+ if(!res.ok){
+   if(path && res.status===404){
+     for(const branch of ['main','master']){
+       const rawUrl='https://raw.githubusercontent.com/'+repo+'/'+branch+'/'+path.split('/').map(encodeURIComponent).join('/');
+       try{
+         const raw=await fetch(rawUrl,{headers:{'User-Agent':'Cluff-Coding-Helper'}});
+         if(raw.ok){
+           const bytes=new Uint8Array(await raw.arrayBuffer());
+           if(bytes.length>120000)throw Error('File exceeds 120 KB');
+           let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+           return {type:'file',size:bytes.length,encoding:'base64',content:btoa(binary),path};
+         }
+       }catch(e){console.error('GitHub raw fallback',String(e))}
+     }
+   }
+   throw Error('GitHub '+res.status+' at '+url+': '+(data.message||'request failed'));
+ }
  return data;
 }
 function codingDecode(b64){const bytes=Uint8Array.from(atob(b64.replace(/\s/g,'')),c=>c.charCodeAt(0));return new TextDecoder('utf-8',{fatal:true}).decode(bytes)}
