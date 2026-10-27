@@ -129,6 +129,9 @@ main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3
 #draftText{min-height:46vh;font-size:1rem;line-height:1.7}
 .write-foot{display:flex;align-items:center;gap:1rem;margin-top:.9rem;flex-wrap:wrap}
 .wordcount{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.08em;color:var(--faint)}
+.wordcount.too-short{color:var(--rose)}
+.wordcount.near-target{color:var(--amber)}
+.wordcount.meets-target{color:var(--green)}
 .savestate{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.1em;color:var(--faint)}
 
 /* results */
@@ -298,7 +301,7 @@ main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3
   <div class="panel">
     <div class="label">Essay Coach</div>
     <h2 id="assignModalTitle">New assignment</h2>
-    <p class="sub">Set a prompt, a rough length target, and who it's for. Length is graded reasonably, not enforced strictly.</p>
+    <p class="sub">Set a prompt, a minimum word count, and who it is for. Students must meet the minimum before submitting.</p>
     <div id="errAssign" class="err" hidden></div>
     <label class="field">
       <span class="label">Title</span>
@@ -309,8 +312,8 @@ main{flex:1;width:100%;max-width:980px;margin:0 auto;padding:clamp(1.75rem,5vw,3
       <textarea id="aPrompt" class="input" rows="5" placeholder="Write a persuasive essay arguing..."></textarea>
     </label>
     <label class="field">
-      <span class="label">Length guidance (optional)</span>
-      <input id="aLength" class="input" type="text" placeholder="e.g. 4-6 paragraphs, or roughly 800 words" maxlength="300">
+      <span class="label">Minimum words</span>
+      <input id="aLength" class="input" type="number" min="1" max="100000" step="1" required placeholder="e.g. 500">
     </label>
     <div class="field">
       <span class="label">Assign to</span>
@@ -524,9 +527,16 @@ async function loadAssignments(){
 /* ══════════════════════════════════════════════════════════════
    Writing workspace
 ══════════════════════════════════════════════════════════════ */
+function countEssayWords(text){ return (text.trim().match(/\S+/g)||[]).length; }
+function minimumWords(){ return Number(currentAssignment?.min_words)||0; }
 function updateWordCount(){
-  const words=($('draftText').value.trim().match(/\S+/g)||[]).length;
-  $('wordCount').textContent=words+' word'+(words===1?'':'s');
+  const words=countEssayWords($('draftText').value);
+  const min=minimumWords();
+  const counter=$('wordCount');
+  counter.textContent=min?`${words} / ${min} words minimum`:`${words} word${words===1?'':'s'}`;
+  counter.classList.remove('too-short','near-target','meets-target');
+  counter.classList.add(min&&words>=min?'meets-target':min&&words>=Math.ceil(min*.75)?'near-target':'too-short');
+  $('btnGrade').disabled=words===0||(min>0&&words<Math.ceil(min*.75));
 }
 function flushDraftSave(){
   if(!currentAssignment) return;
@@ -552,7 +562,7 @@ async function openWrite(assignmentId){
   currentAssignment=r.assignment;
   $('writeTitle').textContent=r.assignment.title;
   $('writePrompt').textContent=r.assignment.prompt;
-  $('writeLen').innerHTML=r.assignment.length_guidance?`Length guidance: <b>${esc(r.assignment.length_guidance)}</b>`:'';
+  $('writeLen').textContent=r.assignment.min_words?`Minimum length: ${r.assignment.min_words} words`:(r.assignment.length_guidance?`Length guidance: ${r.assignment.length_guidance}`:'');
   $('draftText').value=r.essay.draft_text||'';
   $('saveState').textContent=r.essay.draft_text?'Saved':'';
   updateWordCount();
@@ -561,13 +571,18 @@ async function openWrite(assignmentId){
 }
 
 $('btnGrade').onclick=()=>{
-  if(!$('draftText').value.trim()){ toast('Write something before grading.',true); return; }
+  const words=countEssayWords($('draftText').value);
+  const min=minimumWords();
+  if(!words){ toast('Write something before grading.',true); return; }
+  if(min&&words<Math.ceil(min*.75)){ toast(`Write at least ${Math.ceil(min*.75)} words before submitting.`,true); return; }
   openModal('gradeModal');
 };
 $('cancelGrade').onclick=()=>closeModal('gradeModal');
 $('confirmGrade').onclick=async()=>{
   closeModal('gradeModal');
-  flushDraftSave();
+  clearTimeout(saveDraftTimer);
+  const saved=await api('PUT',`/essays/assignments/${currentAssignment.id}/essay/draft`,{draft_text:$('draftText').value});
+  if(saved.error){ toast(saved.error,true); return; }
   const btn=$('btnGrade');
   btn.disabled=true; btn.textContent='Grading… this can take a moment';
   const r=await api('POST',`/essays/assignments/${currentAssignment.id}/essay/grade`);
@@ -726,7 +741,7 @@ function openEditAssignment(assignmentId){
   $('errAssign').hidden=true;
   $('aTitle').value=a.title||'';
   $('aPrompt').value=a.prompt||'';
-  $('aLength').value=a.length_guidance||'';
+  $('aLength').value=a.min_words||'';
   fillStudentPicker((a.targets||[]).map(t=>t.user_id));
   openModal('assignModal');
   $('aTitle').focus();
@@ -736,16 +751,17 @@ $('cancelAssign').onclick=()=>closeModal('assignModal');
 $('saveAssign').onclick=async()=>{
   const title=$('aTitle').value.trim();
   const prompt=$('aPrompt').value.trim();
-  const length_guidance=$('aLength').value.trim();
+  const min_words=Number($('aLength').value);
   const student_ids=[...document.querySelectorAll('#studentPicker input:checked')].map(i=>i.value);
   const showErr=m=>{ $('errAssign').textContent=m; $('errAssign').hidden=false; };
   $('errAssign').hidden=true;
   if(!title||!prompt){ showErr('Title and prompt are required.'); return; }
+  if(!Number.isSafeInteger(min_words)||min_words<1||min_words>100000){ showErr('Enter a minimum word count between 1 and 100,000.'); return; }
   if(!student_ids.length){ showErr('Pick at least one student.'); return; }
 
   const r=editingAssignmentId
-    ? await api('PATCH',`/essays/assignments/${editingAssignmentId}`,{ title, prompt, length_guidance, student_ids })
-    : await api('POST','/essays/assignments',{ title, prompt, length_guidance, student_ids });
+    ? await api('PATCH',`/essays/assignments/${editingAssignmentId}`,{ title, prompt, min_words, student_ids })
+    : await api('POST','/essays/assignments',{ title, prompt, min_words, student_ids });
   if(r.error){ showErr(r.error); return; }
   closeModal('assignModal');
   toast(editingAssignmentId?'Assignment updated.':'Assignment created.');
