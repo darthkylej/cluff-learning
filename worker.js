@@ -2406,7 +2406,32 @@ async function handleCreateSpanishSession(request, env) {
       return err(request, '¡Ya practicaste mucho hoy! That’s plenty of Spanish for today — ¡hasta mañana!', 429);
     }
 
-    const ctx = await loadSpanishContext(env, session.user_id, scenarioKey);
+    // Rotate through every enabled scenario per learner before repeating one.
+    // Least-recently-used selection gives a complete cycle even when a lesson
+    // plan suggests a scenario that has already been visited. Existing session
+    // history is sufficient; no schema change or reset is required.
+    const availableScenarios = await query(env,
+      `SELECT sc.key
+         FROM spanish_scenarios sc
+         LEFT JOIN (
+           SELECT scenario_key, MAX(started_at) AS last_seen
+             FROM spanish_sessions
+            WHERE user_id = $1 AND status <> 'failed'
+            GROUP BY scenario_key
+         ) history ON history.scenario_key = sc.key
+        WHERE sc.enabled = true
+        ORDER BY history.last_seen ASC NULLS FIRST, RANDOM()
+        LIMIT 1`, [session.user_id]);
+    const selectedScenarioKey = availableScenarios.rows?.[0]?.key || scenarioKey;
+    const ctx = await loadSpanishContext(env, session.user_id, selectedScenarioKey);
+    // The rotation is authoritative; an AI-generated lesson plan may choose
+    // curriculum goals, but must not override the next unused scenario.
+    if (ctx.scenario.key !== selectedScenarioKey) {
+      const chosen = await query(env,
+        `SELECT * FROM spanish_scenarios WHERE key = $1 AND enabled = true`,
+        [selectedScenarioKey]);
+      if (chosen.rows?.[0]) ctx.scenario = chosen.rows[0];
+    }
 
     const created = await query(env,
       `INSERT INTO spanish_sessions (user_id, scenario_key, topic_key, engine, model_name, plan_id)
