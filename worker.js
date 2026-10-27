@@ -1420,7 +1420,8 @@ async function handleCreateAssignment(request, env) {
   const body = await request.json();
   const title = String(body.title || '').trim().slice(0, 120);
   const prompt = String(body.prompt || '').trim();
-  const lengthGuidance = String(body.length_guidance || '').trim().slice(0, 300);
+  const minWords = Number(body.min_words);
+  if(!Number.isSafeInteger(minWords)||minWords<1||minWords>100000) return err(request, 'Minimum words must be an integer between 1 and 100,000.');
   const studentIds = Array.isArray(body.student_ids) ? body.student_ids.filter(Boolean) : [];
   if (!title || !prompt) return err(request, 'Title and prompt are required.');
   if (!studentIds.length) return err(request, 'Pick at least one student.');
@@ -1433,9 +1434,9 @@ async function handleCreateAssignment(request, env) {
   if (!targets.length) return err(request, 'None of those students are in your family.');
 
   const ar = await query(env,
-    `INSERT INTO essay_assignments (family_id, created_by, title, prompt, length_guidance)
+    `INSERT INTO essay_assignments (family_id, created_by, title, prompt, min_words)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [gate.family.id, gate.session.user_id, title, prompt, lengthGuidance]);
+    [gate.family.id, gate.session.user_id, title, prompt, minWords]);
   const assignmentId = ar.rows[0].id;
 
   const params = [assignmentId]; const rowsSql = []; let p = 2;
@@ -1468,8 +1469,10 @@ async function handleUpdateAssignment(request, env, assignmentId) {
     if (!prompt) return err(request, 'Prompt cannot be empty.');
     sets.push(`prompt = $${i++}`); vals.push(prompt);
   }
-  if (body.length_guidance !== undefined) {
-    sets.push(`length_guidance = $${i++}`); vals.push(String(body.length_guidance).trim().slice(0, 300));
+  if (body.min_words !== undefined) {
+    const minWords = Number(body.min_words);
+    if(!Number.isSafeInteger(minWords)||minWords<1||minWords>100000) return err(request, 'Minimum words must be an integer between 1 and 100,000.');
+    sets.push(`min_words = ${i++}`); vals.push(minWords);
   }
   if (sets.length) {
     vals.push(assignmentId);
@@ -1524,7 +1527,7 @@ async function handleListAssignments(request, env) {
 
     if (family.role === 'parent') {
       const r = await query(env,
-        `SELECT a.id, a.title, a.prompt, a.length_guidance, a.created_at,
+        `SELECT a.id, a.title, a.prompt, a.length_guidance, a.min_words, a.created_at,
                 json_agg(json_build_object(
                   'user_id', u.id, 'display_name', u.display_name, 'email', u.email,
                   'status', COALESCE(e.status, 'not_started'),
@@ -1543,7 +1546,7 @@ async function handleListAssignments(request, env) {
     }
 
     const r = await query(env,
-      `SELECT a.id, a.title, a.prompt, a.length_guidance, a.created_at,
+      `SELECT a.id, a.title, a.prompt, a.length_guidance, a.min_words, a.created_at,
               COALESCE(e.status, 'not_started') AS status, e.adaptive_score, e.graded_at
          FROM essay_assignments a
          JOIN essay_assignment_targets t ON t.assignment_id = a.id AND t.user_id = $1
@@ -1559,7 +1562,7 @@ async function handleGetEssay(request, env, assignmentId) {
     const essay = await getOrCreateEssay(env, assignmentId, session.user_id);
     if (!essay) return err(request, 'Not found.', 404);
 
-    const ar = await query(env, `SELECT id, title, prompt, length_guidance FROM essay_assignments WHERE id = $1`, [assignmentId]);
+    const ar = await query(env, `SELECT id, title, prompt, length_guidance, min_words FROM essay_assignments WHERE id = $1`, [assignmentId]);
     if (!ar.rows?.length) return err(request, 'Not found.', 404);
 
     return json(request, {
@@ -1591,6 +1594,9 @@ async function handleGradeEssay(request, env, assignmentId) {
     const ar = await query(env, `SELECT * FROM essay_assignments WHERE id = $1`, [assignmentId]);
     const assignment = ar.rows?.[0];
     if (!assignment) return err(request, 'Assignment not found.', 404);
+    const words = (essay.draft_text.trim().match(/\S+/g) || []).length;
+    const minWords = Number(assignment.min_words) || 0;
+    if(minWords && words < Math.ceil(minWords * 0.75)) return err(request, `At least ${Math.ceil(minWords * 0.75)} words are required before grading.`);
 
     await query(env, `UPDATE essays SET status = 'grading' WHERE id = $1`, [essay.id]);
 
