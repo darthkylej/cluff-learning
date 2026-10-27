@@ -256,3 +256,7 @@ CREATE TABLE IF NOT EXISTS essay_issue_history (
   updated_at                    timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, issue_type)
 );
+
+-- Word-count minimum for new and edited essay assignments.
+-- Legacy assignments remain unrestricted until a parent sets a minimum.
+ALTER TABLE essay_assignments ADD COLUMN IF NOT EXISTS min_words integer;
