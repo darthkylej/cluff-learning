@@ -1471,8 +1471,8 @@ async function handleUpdateAssignment(request, env, assignmentId) {
   }
   if (body.min_words !== undefined) {
     const minWords = Number(body.min_words);
-    if(!Number.isSafeInteger(minWords)||minWords<1||minWords>100000) return err(request, 'Minimum words must be an integer between 1 and 100,000.');
-    sets.push('min_words = 
+    if (!Number.isSafeInteger(minWords) || minWords < 1 || minWords > 100000) return err(request, 'Minimum words must be an integer between 1 and 100,000.');
+    sets.push('min_words = ' + String.fromCharCode(36) + (i++)); vals.push(minWords);
   }
   if (sets.length) {
     vals.push(assignmentId);
