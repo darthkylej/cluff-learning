@@ -702,6 +702,10 @@ let holdSrc=null;
 let holdStarting=null;
 // Released, still recording the tail end of the last word.
 let finishing=false;
+// While the tail runs, calling this cancels the stop and carries the same
+// recording on as a new hold — a child who presses again mid-tail meant to
+// keep talking, and used to be silently ignored.
+let resumeTail=null;
 
 // Children let go of the button while the last word is still coming out, and
 // beginners trail off slowly. Keep capturing briefly after release so that
@@ -714,6 +718,16 @@ function readyToTalk(){
 }
 
 function beginHold(src){
+  if(finishing && resumeTail && !holding && !S.busy && !S.ended){
+    holding=true;
+    holdSrc=src||'pointer';
+    $('orb').classList.remove('finishing');
+    $('orb').classList.add('rec');
+    $('orbHint').textContent='Listening… release when done';
+    setState('listening','Escuchando…');
+    resumeTail();
+    return;
+  }
   if(S.busy||S.ended||holding||finishing||!S.id) return;
   if(MODE==='none'){ toast('This browser cannot record audio.',true); return; }
   holding=true;
@@ -773,22 +787,31 @@ async function endHold(src){
     $('orb').classList.remove('rec');
     $('orb').classList.add('finishing');
     $('orbHint').textContent='…';
-    await new Promise(r=>setTimeout(r,RELEASE_TAIL_MS));
+    const resumed=await new Promise(r=>{
+      const t=setTimeout(()=>{ resumeTail=null; r(false); },RELEASE_TAIL_MS);
+      resumeTail=()=>{ clearTimeout(t); resumeTail=null; r(true); };
+    });
+    if(resumed) return;              // pressed again: the turn carries on
     $('orb').classList.remove('finishing');
 
+    // The tail is there to catch a trailing word, not to bill it: speaking
+    // time on the Flight Deck and against the monthly cap ends at release.
+    const tailSecs=RELEASE_TAIL_MS/1000;
     if(MODE==='websr'){
       const {text,conf,secs}=await stopListening();
       stopLevelMeter();
       if(!text){ nothingHeard(); return; }
-      await sendTurn({transcript:text,confidence:conf,seconds:secs});
+      await sendTurn({transcript:text,confidence:conf,seconds:Math.max(0,secs-tailSecs)});
     } else {
       const rec=await stopRecording();
       stopLevelMeter();
       if(!rec || rec.blob.size<1200){ nothingHeard(); return; }
+      rec.secs=Math.max(0,rec.secs-tailSecs);
       await sendTurn({audio:rec});
     }
   } finally {
-    $('orb').classList.remove('finishing');
+    // A resumed hold owns the orb now; leave its look alone.
+    if(!holding) $('orb').classList.remove('finishing');
     finishing=false;
   }
 }

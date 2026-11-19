@@ -1122,7 +1122,7 @@ const ESSAY_RUBRIC = {
   organization: { max: 15, label: 'Organization & flow' },
   argument:     { max: 25, label: 'Argument quality (logic, evidence, avoiding fallacies)' },
   persuasion:   { max: 15, label: 'Persuasiveness & rhetorical craft' },
-  polish:       { max: 10, label: 'Holistic college-readiness & polish' },
+  polish:       { max: 10, label: 'Holistic polish (how finished and assured the writing is overall)' },
 };
 const ISSUE_TIERS = ['mechanics', 'clarity', 'organization', 'argument', 'rhetoric'];
 
@@ -1317,6 +1317,9 @@ This governs only HOW you word things. It must NOT change what you look for or h
 - Still find and report every real issue. If a 9-year-old commits a logical fallacy, still flag it — just describe it as "your reason doesn't quite prove your point" rather than naming it a non sequitur.
 - The issue_type slug stays a stable, consistent identifier (e.g. comma_splice, unsupported_claim) no matter what reading level the description is written for. Never simplify or rename the slug itself.
 
+NEVER MENTION COLLEGE TO THE STUDENT:
+The college standard is how you score, not something the student is told. In every field the student reads (notes, suggestions, strengths, overall feedback, issue descriptions), never mention college, college classes, college writing, college-readiness, professors, or what a college instructor would expect, and never say the work is or isn't "ready" for any school level. Describe the target simply as strong, clear, polished writing.
+
 Segment the essay into sentences covering the ENTIRE text with nothing omitted or reworded, and call the submit_essay_grade tool with your complete result. Be specific in every note — cite the actual words, not just the category.`;
 }
 
@@ -1358,19 +1361,25 @@ function selectTopIssues(catalog) {
   return picked;
 }
 
+// The score a student sees. Two parts:
+//  - level: the real (college-rubric) score mapped onto an encouraging scale,
+//    50 + 0.6 x real, so 30 shows as 68, 50 as 80 and 70 as 92. Better writing
+//    always shows higher, and a steady writer at their own average keeps
+//    seeing their level instead of being pulled toward a fixed midpoint.
+//  - growth: a small, capped nudge against their own recent average (last 5
+//    graded essays): up to +8 for improvement, down to -6 for a dip.
+// 100 therefore takes genuinely strong work (a real ~84 held steady, or ~75
+// with clear improvement). The old version was 78 plus 2.2x the change, so a
+// 51 or 55 could show as 100 while a steady 52 showed as 69.
 function computeAdaptiveScore(scoreTotal, priorScores) {
-  let adaptive;
-  if (!priorScores.length) {
-    // First essay ever: compress upward so a rough first attempt still
-    // feels encouraging, while leaving clear room to grow.
-    adaptive = 55 + scoreTotal * 0.45;
-  } else {
+  const level = 50 + 0.6 * scoreTotal;
+  let growth = 0;
+  if (priorScores.length) {
     const baseline = priorScores.reduce((a, b) => a + b, 0) / priorScores.length;
     const delta = scoreTotal - baseline;
-    // Reward improvement generously; soften but don't erase a decline.
-    adaptive = 78 + delta * (delta >= 0 ? 2.2 : 1.3);
+    growth = delta >= 0 ? Math.min(8, delta * 0.5) : Math.max(-6, delta * 0.4);
   }
-  return clampInt(adaptive, 35, 100);
+  return clampInt(level + growth, 50, 100);
 }
 
 function stripScoresForLearner(feedback) {
