@@ -2134,19 +2134,30 @@ invites emotional dependency. Keep role-play clearly pretend. Never ask for addr
 names, passwords, or other identifying details.`;
 }
 
-function buildSpanishTurnContent(ctx, transcript, confidence, note) {
+function buildSpanishTurnContent(ctx, transcript, confidence, note, opts = {}) {
   const history = (ctx.history || []).map(t =>
     `${t.speaker === 'coach' ? 'COACH' : 'LEARNER'}: ${t.transcript}`).join('\n');
 
   const head = `${note}\n\n${history ? `CONVERSATION SO FAR\n${history}\n\n` : ''}`;
 
   if (!transcript) {
+    if (opts.askAgain) {
+      return `${head}The learner spoke, but speech recognition could not make out their words ` +
+        `(too quiet, too short, or unclear). This is NOT a learner error and says nothing about ` +
+        `their Spanish. In one short, kind sentence of simple Spanish, ask them to say it again ` +
+        `(for example "¿Me lo dices otra vez?"), then repeat or simplify your last question. ` +
+        `Do not report an intervention and list no vocabulary.`;
+    }
+    if (opts.control && history) {
+      return `${head}The learner pressed a button instead of speaking. Follow the [CONTROL] ` +
+        `instruction above. Do not report an intervention.`;
+    }
     return `${head}The learner has not spoken yet. Greet them warmly in Spanish and ask one easy ` +
       `opening question, pitched at their level. Do not report an intervention.`;
   }
 
   const conf = confidence == null ? 'unknown'
-    : confidence < 0.6 ? `${confidence.toFixed(2)} (LOW — likely a recognition problem, not a learner error)`
+    : confidence < SPANISH_LOW_CONFIDENCE ? `${confidence.toFixed(2)} (LOW — likely a recognition problem, not a learner error)`
     : confidence.toFixed(2);
 
   return `${head}LEARNER JUST SAID (speech recognition, confidence ${conf}):\n"${transcript}"\n\n` +
@@ -2372,18 +2383,96 @@ async function spanishTranscribe(env, bytes, contentType, coachLine) {
   throw last;
 }
 
+// Where the coach starts treating a transcript as a possible mishearing.
+// On the calibrated scale below this is Whisper's own line: an average
+// log-probability of about -1.0, which Whisper itself uses to decide a
+// decode failed.
+const SPANISH_LOW_CONFIDENCE = 0.5;
+
 function spanishReadTranscription(data) {
-  // Derive a rough confidence so the coach still knows when NOT to treat
-  // something as a learner error. verbose_json gives per-segment avg_logprob;
-  // models that don't return it yield null, which the prompt reads as "unknown".
-  let confidence = null;
+  // A confidence the coach can act on, so it knows when NOT to treat
+  // something as a learner error. verbose_json gives per-segment avg_logprob
+  // and no_speech_prob; models that don't return them yield null, which the
+  // prompt reads as "unknown".
+  //
+  // The old reading was exp(mean avg_logprob) x (1 - mean no_speech_prob).
+  // That put a correct "Es una flor." at 0.58 and an adult speaker's turns at
+  // 0.39 on average, so 94% of everything the kids said was flagged LOW and
+  // the coach hedged on nearly every correction. Two reasons: exp() of a
+  // normal log-probability (-0.4 to -0.9) is already only 0.4-0.7, and short
+  // clips carry a moderate no_speech_prob even when the words are right.
+  //
+  // Now: a logistic centred on -1.0 (Whisper's own failure line), so -0.5
+  // reads 0.88 and -0.3 reads 0.94, while -1.5 reads 0.12. no_speech_prob
+  // only counts once it is actually high (over 0.6), and the combination
+  // Whisper uses for "this was silence" marks the turn silent outright.
+  let confidence = null, silent = false;
   const segs = Array.isArray(data.segments) ? data.segments : [];
   if (segs.length) {
-    const lp = segs.reduce((n, s) => n + (Number(s.avg_logprob) || 0), 0) / segs.length;
-    const noSpeech = segs.reduce((n, s) => n + (Number(s.no_speech_prob) || 0), 0) / segs.length;
-    confidence = Math.max(0, Math.min(1, Math.exp(lp) * (1 - noSpeech)));
+    // Weight by duration so a long clear segment isn't outvoted by a
+    // fragment of breath at the end.
+    const w = segs.map(s => Math.max(0.1, (Number(s.end) || 0) - (Number(s.start) || 0)));
+    const wSum = w.reduce((a, b) => a + b, 0);
+    const avg = key => segs.reduce((n, s, i) => n + (Number(s[key]) || 0) * w[i], 0) / wSum;
+    const lp = avg('avg_logprob');
+    const noSpeech = avg('no_speech_prob');
+    const compression = Math.max(...segs.map(s => Number(s.compression_ratio) || 0));
+
+    confidence = 1 / (1 + Math.exp(-4 * (lp + 1)));
+    if (noSpeech > 0.6) confidence *= (1 - noSpeech) / 0.4;
+    // A high compression ratio means repeated text, Whisper's other
+    // hallucination signature ("Gracias por ver este vídeo. Gracias por...").
+    if (compression > 2.4) confidence = Math.min(confidence, 0.3);
+    confidence = Math.max(0, Math.min(1, confidence));
+    silent = noSpeech > 0.6 && lp < -1;
   }
-  return { text: String(data.text || '').trim(), confidence };
+  return { text: String(data.text || '').trim(), confidence, silent };
+}
+
+// ── Transcripts that aren't the child ──────────────────────────
+// Whisper was trained on subtitled video, and on near-silence or a clipped
+// sound it fills in what subtitles usually say: credits, channel names,
+// sign-offs. In the stored turns "Subtítulos realizados por la comunidad de
+// Amara.org" alone appears 62 times, and a stray "C" 24 times. None of these
+// are a learner's Spanish, so they must never be corrected or counted.
+// Matched against sttNorm() text: lower case, no accents, no punctuation.
+const SPANISH_STT_HALLUCINATIONS = [
+  /\bamara\b/,                                            // Amara.org credits
+  /\b(subtitul\w*|sincronizacion)( realizad\w*)? por\b/,  // "Subtítulos (realizados) por..."
+  /\bes el canal de\b/,                                   // "Este es el canal de subtítulos..."
+  /\bcanal de subtitulos\b/,
+  /\bgracias por (ver|mirar|seguirme|su atencion|vernos)\b/,
+  /\bsuscrib/,                                            // suscríbete, suscríbanse
+  /\bcc por\b/,
+  /\bmas informacion (en )?www\b/,
+  /\bnos vemos en el proximo (video|capitulo|episodio)\b/,
+  /\bun saludo y hasta la proxima\b/,
+  // Our own transcription prompt read back as speech.
+  /\bconversacion (en espanol )?entre un nino\b/,
+  /\bel nino responde\b/,
+  /\bel maestro dijo\b/,
+];
+
+// Real one- and two-letter replies. Anything else that short ("C", "S.T.",
+// "Q-r.", "B.") is a clipped sound, not an answer.
+const SPANISH_SHORT_WORDS = new Set([
+  'a', 'e', 'o', 'u', 'y', 'si', 'no', 'ya', 'yo', 'tu', 'mi', 'te', 'se', 'me',
+  'le', 'lo', 'la', 'el', 'un', 'de', 'en', 'es', 'al', 'su', 'ni', 'va', 've',
+  'da', 'di', 'ah', 'oh', 'eh', 'ay', 'uy', 'ok',
+]);
+
+// Returns why a transcript should be treated as unheard, or null if it is
+// plausibly what the child said.
+function spanishTranscriptJunk(text) {
+  const raw = String(text || '');
+  const norm = sttNorm(raw);
+  const letters = norm.replace(/[^a-z]/g, '');
+  const hasDigits = /\d/.test(norm);
+  if (!letters && !hasDigits) return 'empty';
+  if (!hasDigits && letters.length <= 2 && !SPANISH_SHORT_WORDS.has(letters)) return 'fragment';
+  if (/\bwww\.|\.(com|org|net)\b/i.test(raw)) return 'hallucination';
+  if (SPANISH_STT_HALLUCINATIONS.some(re => re.test(norm))) return 'hallucination';
+  return null;
 }
 
 // ── Session creation ───────────────────────────────────────────
@@ -2512,6 +2601,7 @@ async function handleSpanishTurn(request, env, sessionId) {
     // transcribe it here. Same endpoint either way, so one round trip.
     const contentType = request.headers.get('Content-Type') || '';
     let transcript, confidence, turnIndex, control, learnerSeconds;
+    let heardSilent = false;
 
     // Recent history keeps the prompt bounded on long sessions. Read before
     // transcribing: the coach's last line is context for the transcriber.
@@ -2538,6 +2628,7 @@ async function handleSpanishTurn(request, env, sessionId) {
           const heard = await spanishTranscribe(env, bytes, contentType, lastCoachLine);
           transcript  = cleanText(heard.text, 2000);
           confidence  = heard.confidence;
+          heardSilent = heard.silent === true;
         } catch (e) {
           // Log what a `wrangler tail` needs to settle this in one turn: the
           // container the device sent, how much audio arrived, and the upstream
@@ -2569,6 +2660,22 @@ async function handleSpanishTurn(request, env, sessionId) {
       control        = cleanKey(body.control);    // slower | repeat | meaning | direct
       learnerSeconds = spanishNum(body.audio_seconds, 0, 300, 0);
     }
+    // Something was sent but nothing usable came back: a subtitle credit
+    // Whisper invented over near-silence, a stray letter from a clipped
+    // sound, or audio Whisper itself judged to be silence. Not the child's
+    // Spanish, so it is not stored, corrected or counted; the coach asks
+    // them to say it again instead of re-greeting or guessing.
+    const unheard = transcript
+      ? (spanishTranscriptJunk(transcript) || (heardSilent ? 'silence' : null))
+      : null;
+    if (unheard) {
+      console.log('Spanish turn not understood', {
+        reason: unheard, chars: transcript.length, confidence, seconds: learnerSeconds,
+      });
+      transcript = null; confidence = null;
+    }
+    const askAgain = !transcript && !control && history.length > 0;
+
     // Recording time, banked for the Flight Deck. Only holds that produced
     // words count: holding the button in silence is not speaking Spanish, and
     // it is the one number a parent would misread if we inflated it.
@@ -2605,7 +2712,7 @@ async function handleSpanishTurn(request, env, sessionId) {
     try {
       result = await callClaude(env, {
         system:      buildSpanishSystem(ctx),
-        content:     buildSpanishTurnContent(ctx, transcript, confidence, clockLine),
+        content:     buildSpanishTurnContent(ctx, transcript, confidence, clockLine, { askAgain, control }),
         tool:        SPANISH_TURN_TOOL,
         model:       SPANISH_TURN_MODEL,
         maxTokens:   700,
@@ -2638,7 +2745,7 @@ async function handleSpanishTurn(request, env, sessionId) {
       [sessionId, turnIndex, replyText, spanishSpeechSeconds(replyText)]);
 
     // Pedagogical event — recorded server-side, never client-trusted.
-    const iv = result.intervention;
+    const iv = askAgain ? null : result.intervention;
     if (iv && SPANISH_INTERVENTIONS.includes(iv.intervention_type)) {
       await query(env,
         `INSERT INTO spanish_interventions
@@ -2657,7 +2764,8 @@ async function handleSpanishTurn(request, env, sessionId) {
       }
     }
 
-    for (const v of (Array.isArray(result.vocabulary) ? result.vocabulary.slice(0, 8) : [])) {
+    const vocab = !askAgain && Array.isArray(result.vocabulary) ? result.vocabulary.slice(0, 8) : [];
+    for (const v of vocab) {
       const lemma = cleanText(v.lemma, 80);
       if (!lemma) continue;
       const correct = v.evidence === 'produced_correctly' ? 1 : 0;
