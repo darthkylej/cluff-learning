@@ -126,7 +126,7 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 .orb{position:relative;--lvl:0;width:96px;height:96px;border-radius:50%;border:2px solid rgba(245,165,36,.35);
   display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
   background:radial-gradient(circle at 50% 40%, rgba(245,165,36,.20), rgba(245,165,36,.04));
-  transition:all .18s var(--ease);touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  transition:all .18s var(--ease);touch-action:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
 /* Ring that swells with live input — proves the mic is actually hearing you. */
 .orb.rec::after{content:'';position:absolute;inset:-8px;border-radius:50%;border:2px solid var(--green);
   opacity:calc(.12 + var(--lvl) * .88);transform:scale(calc(1 + var(--lvl) * .16));pointer-events:none}
@@ -142,6 +142,8 @@ main{flex:1;width:100%;max-width:860px;margin:0 auto;padding:clamp(1.5rem,5vw,2.
 .orb.rec{border-color:var(--green);background:radial-gradient(circle at 50% 40%, rgba(52,211,153,.30), rgba(52,211,153,.06));
   box-shadow:0 0 40px -6px rgba(52,211,153,.75);animation:breathe 1.6s var(--ease) infinite}
 .orb.off{opacity:.35;cursor:not-allowed}
+/* Released, but still recording the last word for a moment. */
+.orb.finishing{border-color:var(--green);background:radial-gradient(circle at 50% 40%, rgba(52,211,153,.18), rgba(52,211,153,.04))}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 .orb svg{width:38px;height:38px;fill:none;stroke:currentColor;stroke-width:1.6;color:var(--amber)}
 .orb.rec svg{color:var(--green)}
@@ -417,8 +419,9 @@ function buildRecognizer(){
     recActive=false;
     // Chrome ends recognition on its own after a brief silence. If the child
     // is still holding the button they haven't finished — restart, or their
-    // turn vanishes with no error anywhere.
-    if(holding && !recResolve){
+    // turn vanishes with no error anywhere. The same holds during the short
+    // tail after release, when the last word may still be arriving.
+    if((holding||finishing) && !recResolve){
       try{ recog=buildRecognizer(); recog.start(); recActive=true; return; }
       catch(e){ console.warn('restart failed',e); }
     }
@@ -534,7 +537,11 @@ async function startRecording(existing){
   const mime=pickMime();
   recorder = mime ? new MediaRecorder(stream,{mimeType:mime}) : new MediaRecorder(stream);
   recorder.ondataavailable=e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
+  // Wait until the recorder is actually capturing before telling the child to
+  // talk. Lighting the orb first is how a first syllable got clipped.
+  const started=new Promise(res=>{ recorder.onstart=res; setTimeout(res,600); });
   recorder.start();
+  await started;
   clearTimeout(holdCap);
   holdCap=setTimeout(()=>{ if(holding){ toast('That was a long turn — sending it now.'); endHold(); } },MAX_HOLD_MS);
   $('youLine').textContent='';
@@ -686,36 +693,59 @@ async function sendTurn({transcript,confidence,seconds,control,audio}){
 
 /* ── push-to-talk ── */
 let holding=false;
+// What started the hold: 'pointer' (mouse, touch, pen) or 'key'. A release only
+// ends the kind of hold it belongs to, so a stray click can't end a spacebar
+// turn and a key bounce can't end a finger turn.
+let holdSrc=null;
+// Set while the mic is being opened, so a very quick tap can't stop a recorder
+// that hasn't started yet (and leave one running with nobody holding).
+let holdStarting=null;
+// Released, still recording the tail end of the last word.
+let finishing=false;
+
+// Children let go of the button while the last word is still coming out, and
+// beginners trail off slowly. Keep capturing briefly after release so that
+// word reaches the transcriber instead of being cut in half.
+const RELEASE_TAIL_MS=700;
 
 function readyToTalk(){
   setState('listening','Tu turno');
   $('orbHint').textContent='Hold to talk';
 }
 
-async function beginHold(){
-  if(S.busy||S.ended||holding||!S.id) return;
+function beginHold(src){
+  if(S.busy||S.ended||holding||finishing||!S.id) return;
   if(MODE==='none'){ toast('This browser cannot record audio.',true); return; }
   holding=true;
+  holdSrc=src||'pointer';
   stopAudio();
-  $('orb').classList.add('rec');
-  $('orbHint').textContent='Listening… release when done';
-  setState('listening','Escuchando…');
+  $('orbHint').textContent='Getting ready…';
 
-  try{
-    // Both modes get the level meter, so "is the mic live?" is always answerable.
-    const stream=await ensureStream();
-    $('levelBar').classList.add('on');
-    startLevelMeter(stream, sessionLevel);
-    if(MODE==='websr') startListening();
-    else await startRecording(stream);
-  }catch(e){
-    console.warn('capture failed',e);
-    holding=false;
-    $('orb').classList.remove('rec');
-    stopLevelMeter();
-    readyToTalk();
-    toast('Microphone unavailable — check the site’s mic permission.',true);
-  }
+  holdStarting=(async()=>{
+    try{
+      // Both modes get the level meter, so "is the mic live?" is always answerable.
+      const stream=await ensureStream();
+      $('levelBar').classList.add('on');
+      startLevelMeter(stream, sessionLevel);
+      if(MODE==='websr') startListening();
+      else await startRecording(stream);
+      // Only now is the mic really capturing, so only now say "talk".
+      $('orb').classList.add('rec');
+      if(holding){
+        $('orbHint').textContent='Listening… release when done';
+        setState('listening','Escuchando…');
+      }
+      return true;
+    }catch(e){
+      console.warn('capture failed',e);
+      holding=false; holdSrc=null;
+      $('orb').classList.remove('rec');
+      stopLevelMeter();
+      readyToTalk();
+      toast('Microphone unavailable — check the site’s mic permission.',true);
+      return false;
+    }
+  })();
 }
 
 // Nothing captured? Say why. Silence here is what made this feel broken.
@@ -732,22 +762,34 @@ function nothingHeard(){
   }
 }
 
-async function endHold(){
-  if(!holding) return;
-  holding=false;
-  $('orb').classList.remove('rec');
-  $('orbHint').textContent='…';
+async function endHold(src){
+  if(!holding||finishing) return;
+  if(src && holdSrc && src!==holdSrc) return;
+  holding=false; holdSrc=null;
+  finishing=true;
+  try{
+    const ok=await holdStarting;
+    if(!ok) return;
+    $('orb').classList.remove('rec');
+    $('orb').classList.add('finishing');
+    $('orbHint').textContent='…';
+    await new Promise(r=>setTimeout(r,RELEASE_TAIL_MS));
+    $('orb').classList.remove('finishing');
 
-  if(MODE==='websr'){
-    const {text,conf,secs}=await stopListening();
-    stopLevelMeter();
-    if(!text){ nothingHeard(); return; }
-    await sendTurn({transcript:text,confidence:conf,seconds:secs});
-  } else {
-    const rec=await stopRecording();
-    stopLevelMeter();
-    if(!rec || rec.blob.size<1200){ nothingHeard(); return; }
-    await sendTurn({audio:rec});
+    if(MODE==='websr'){
+      const {text,conf,secs}=await stopListening();
+      stopLevelMeter();
+      if(!text){ nothingHeard(); return; }
+      await sendTurn({transcript:text,confidence:conf,seconds:secs});
+    } else {
+      const rec=await stopRecording();
+      stopLevelMeter();
+      if(!rec || rec.blob.size<1200){ nothingHeard(); return; }
+      await sendTurn({audio:rec});
+    }
+  } finally {
+    $('orb').classList.remove('finishing');
+    finishing=false;
   }
 }
 
@@ -1001,26 +1043,37 @@ document.querySelectorAll('[data-ctl]').forEach(b=>{
 });
 
 const orb=$('orb');
-orb.addEventListener('mousedown',e=>{ e.preventDefault(); beginHold(); });
-orb.addEventListener('mouseup',endHold);
-orb.addEventListener('mouseleave',()=>{ if(holding) endHold(); });
-orb.addEventListener('touchstart',e=>{ e.preventDefault(); beginHold(); },{passive:false});
-orb.addEventListener('touchend',e=>{ e.preventDefault(); endHold(); },{passive:false});
-orb.addEventListener('keydown',e=>{ if((e.code==='Space'||e.code==='Enter')&&!e.repeat){ e.preventDefault(); beginHold(); } });
-orb.addEventListener('keyup',e=>{ if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); endHold(); } });
+// Pointer events cover mouse, touch and pen. Capturing the pointer means a
+// finger or mouse that drifts off the orb mid-sentence keeps the turn going;
+// only letting go ends it. (Sliding off used to end the turn on a computer.)
+orb.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse' && e.button!==0) return;
+  e.preventDefault();
+  try{ orb.setPointerCapture(e.pointerId); }catch(_){}
+  beginHold('pointer');
+});
+orb.addEventListener('pointerup',()=>endHold('pointer'));
+orb.addEventListener('pointercancel',()=>endHold('pointer'));
+// Backstop for browsers without pointer capture: a release anywhere counts.
+document.addEventListener('pointerup',()=>{ if(holding) endHold('pointer'); });
+orb.addEventListener('contextmenu',e=>e.preventDefault());   // long-press menu on tablets
+// Switching away mid-hold would otherwise leave the mic recording.
+addEventListener('blur',()=>{ if(holding) endHold(); });
+orb.addEventListener('keydown',e=>{ if((e.code==='Space'||e.code==='Enter')&&!e.repeat){ e.preventDefault(); beginHold('key'); } });
+orb.addEventListener('keyup',e=>{ if(e.code==='Space'||e.code==='Enter'){ e.preventDefault(); endHold('key'); } });
 
 // Spacebar anywhere on the live screen is push-to-talk.
 document.addEventListener('keydown',e=>{
   if(e.code!=='Space'||e.repeat) return;
   if(!$('screen-live').classList.contains('active')) return;
   if(e.target.tagName==='BUTTON'||e.target.tagName==='INPUT') return;
-  e.preventDefault(); beginHold();
+  e.preventDefault(); beginHold('key');
 });
 document.addEventListener('keyup',e=>{
   if(e.code!=='Space') return;
   if(!$('screen-live').classList.contains('active')) return;
   if(e.target.tagName==='BUTTON'||e.target.tagName==='INPUT') return;
-  e.preventDefault(); endHold();
+  e.preventDefault(); endHold('key');
 });
 
 $('btnSignOut').addEventListener('click',async()=>{
