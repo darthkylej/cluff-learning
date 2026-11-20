@@ -692,7 +692,8 @@ function rangeText(s, op){
 ══════════════════════════════════════════════════════════════ */
 const START_LEAD   = 6;      // steps of head start, and where a catch knocks it back to
 const MAX_LEAD     = 10;     // beyond this the camera stops pulling back
-const LEVEL_GOAL   = 10;     // right answers per level
+// Right answers per level. A preview can shorten it to get to a boss quickly.
+const LEVEL_GOAL   = PREVIEW ? clamp(parseInt(PREVIEW_ARGS.get('goal') || '10', 10) || 10, 1, 10) : 10;
 const BOSS_EVERY   = 3;      // every third level ends with a boss
 const START_HEARTS = 3;
 const MAX_HEARTS   = 5;
@@ -735,9 +736,12 @@ function resetGame(){
 // and a cap so it never outruns a child who is answering steadily.
 function monsterSpeed(){
   if(G.invuln > 0) return 0;
-  const base = Math.min(0.62, 0.17 + 0.035 * (G.level - 1));
-  const ramp = Math.min(0.12, 0.0035 * G.levelT);
+  const base = Math.min(0.8, 0.08 + 0.03 * (G.level - 1));
+  const ramp = Math.min(0.06, 0.002 * G.levelT);
   let v = base + ramp;
+  // Once it is right behind you it creeps rather than pounces: the
+  // tension stays, and a slower child still gets a fair chance to pull away.
+  if(G.runner - G.monster < 2) v *= 0.65;
   if(G.power.board > 0) v *= 0.5;
   if(G.boss) v *= 0.55;
   return v;
@@ -1853,7 +1857,7 @@ function drawEnemies(){
   for(const e of G.enemies){
     const [x, y] = enemyXY(e);
     if(x > W + 40) continue;
-    const r = 13 * s * e.r;
+    const r = 15 * s * e.r;
     cx.save();
     cx.translate(x, y);
     cx.save();
