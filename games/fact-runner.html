@@ -210,6 +210,41 @@
     transition:opacity .3s, transform .3s; }
   #bestBanner.show{ opacity:1; transform:translate(-50%,0); }
 
+  /* ── Hearts, level, power-ups ───────────────────────────────── */
+  #hudHearts{ font-size:1.15rem; letter-spacing:.06em; line-height:1; margin-top:4px; white-space:nowrap; }
+  #hudHearts .h{ color:#fb7185; text-shadow:0 0 10px rgba(251,113,133,.6); }
+  #hudHearts .h.off{ color:rgba(123,149,180,.35); text-shadow:none; }
+  #hudHearts.hurt{ animation:hurt .5s; }
+  @keyframes hurt{ 0%,100%{transform:none} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+  .hud .box.lvl b{ color:var(--cyan); }
+  .hud2{ display:flex; align-items:center; gap:12px; margin:-2px 0 12px; flex-wrap:wrap; }
+  #levelWrap{ flex:1; min-width:180px; }
+  #levelLabel{ font-family:var(--font-mono); font-size:.6rem; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); }
+  #levelTrack{ height:8px; border-radius:99px; background:rgba(79,209,224,.10);
+    border:1px solid var(--line); overflow:hidden; margin-top:5px; }
+  #levelBar{ height:100%; width:0%; border-radius:99px; transition:width .25s;
+    background:linear-gradient(90deg,var(--violet),var(--cyan)); }
+  #levelWrap.boss #levelBar{ background:linear-gradient(90deg,#f5a524,#fb7185); }
+  #levelWrap.boss #levelLabel{ color:var(--gold); }
+  #powerTray{ display:flex; gap:6px; flex-wrap:wrap; min-height:26px; }
+  .pchip{ font-family:var(--font-mono); font-size:.62rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:5px 8px; border-radius:99px; border:1px solid var(--line-mid); background:rgba(10,17,32,.7);
+    color:var(--hull); white-space:nowrap; }
+  .pchip.boots{ border-color:rgba(245,165,36,.6); }
+  .pchip.board{ border-color:rgba(52,211,153,.6); }
+  .pchip.blaster{ border-color:rgba(79,209,224,.6); }
+  .pchip.shield{ border-color:rgba(167,139,250,.7); }
+  #popBanner{ position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) scale(.8); z-index:6;
+    padding:10px 18px; border-radius:var(--r); pointer-events:none; opacity:0; text-align:center;
+    background:rgba(4,7,15,.82); border:1px solid var(--line-hot); color:var(--hull);
+    font-family:var(--font-mono); font-size:.85rem; letter-spacing:.14em; text-transform:uppercase;
+    box-shadow:0 0 40px -8px rgba(167,139,250,.7); transition:opacity .25s, transform .25s; }
+  #popBanner small{ display:block; margin-top:4px; font-size:.62rem; color:var(--muted); letter-spacing:.12em; }
+  #popBanner.show{ opacity:1; transform:translate(-50%,-50%) scale(1); }
+  #popBanner.gold{ border-color:rgba(245,165,36,.7); color:var(--gold); box-shadow:0 0 40px -8px rgba(245,165,36,.8); }
+  #popBanner.red{ border-color:rgba(251,113,133,.7); color:#fecdd3; box-shadow:0 0 40px -8px rgba(251,113,133,.8); }
+  #popBanner.green{ border-color:rgba(52,211,153,.7); color:#bbf7d0; box-shadow:0 0 40px -8px rgba(52,211,153,.8); }
+
   /* ── Game over ──────────────────────────────────────────────── */
   #overCard{ text-align:center; padding:26px 20px 34px; }
   #overScene{ display:block; width:min(520px,100%); height:170px; margin:0 auto 2px; }
@@ -231,6 +266,8 @@
     #equation{ gap:.25em; }
     #answer{ width:3em; }
     #menuScene{ height:94px; }
+    .hud .box b{ font-size:1.05rem; }
+    #popBanner{ font-size:.72rem; padding:8px 12px; }
     #overScene{ height:140px; }
   }
 </style>
@@ -267,13 +304,14 @@
     <div class="hero">
       <canvas id="menuScene" aria-hidden="true"></canvas>
       <div class="title"><span class="t1">Fact</span> <span class="t2">Runner</span></div>
-      <p class="sub">Answer fast, stay ahead. Every right answer is a step forward —<br>every wrong one is a step back, and it is <em>gaining</em>.</p>
+      <p class="sub">Answer fast, stay ahead, and blast your way from level to level.<br>Grab power-ups, zap the space blobs, and beat a boss every third level.</p>
     </div>
 
     <div class="stats">
       <div class="stat"><div class="v" id="menuBest">0</div><div class="k">Best score</div></div>
+      <div class="stat"><div class="v" id="menuLevel">1</div><div class="k">Highest level</div></div>
+      <div class="stat"><div class="v" id="menuRight">0</div><div class="k">Most facts in a run</div></div>
       <div class="stat"><div class="v" id="menuRuns">0</div><div class="k">Runs</div></div>
-      <div class="stat"><div class="v" id="menuFar">0</div><div class="k">Furthest steps</div></div>
     </div>
 
     <div class="panelbox">
@@ -319,9 +357,12 @@
       <h3>How to play</h3>
       <ul class="how">
         <li>A problem appears. Type the answer and press <b>Enter</b>.</li>
-        <li><b>Correct</b> — a bright bling, the numbers flash green, and your pack fires you a step forward. A run of them lights the whole suit.</li>
-        <li><b>Wrong</b> — a buzzer, the numbers flash red, and you stumble a step back. The answer is shown, then <b>the same problem comes back</b> until you get it right.</li>
-        <li>The monster never stops, and it speeds up the longer you last. Distance is the only thing keeping it off you.</li>
+        <li><b>Correct</b>: you jump a step ahead and zap the nearest space blob. <b>Fast</b> answers jump you further and score more.</li>
+        <li><b>Wrong</b>: you stumble a step back. The answer is shown, then <b>the same problem comes back</b> until you get it right.</li>
+        <li>You have <b>3 hearts</b>. When the monster catches you, you lose one and it gets knocked back. Lose them all and the run is over.</li>
+        <li>Answer 10 right to clear a level. Every level the monster gets a little faster.</li>
+        <li><b>Power-ups</b> drop every 5 in a row and on every new level: <b>Speed Boots</b> (double jumps), <b>Hover Board</b> (the monster slows down), <b>Blaster</b> (knocks the monster back), <b>Shield</b> (blocks one catch) and <b>extra hearts</b>.</li>
+        <li>Every third level ends with a <b>boss</b>. Each right answer hits it, fast answers hit twice. Beat it before it charges up, or it blasts you back.</li>
         <li id="negLine">Negative answers are fine — type the minus sign, or tap <b>±</b>.</li>
         <li>Press <b>Esc</b> to pause.</li>
       </ul>
@@ -332,6 +373,7 @@
   <section id="screen-game" class="screen">
     <div id="sceneWrap">
       <canvas id="scene"></canvas>
+      <div id="popBanner"></div>
       <div id="pauseVeil" class="hidden">
         <div>Paused</div>
         <button id="btnResume" class="primary">Resume</button>
@@ -339,14 +381,24 @@
     </div>
 
     <div class="hud">
+      <div class="box lvl">Level<b id="hudLevel">1</b></div>
       <div class="box">Score<b id="hudScore">0</b></div>
       <div class="box best">Best<b id="hudBest">0</b></div>
       <div class="box">Streak<b id="hudStreak">0</b></div>
+      <div class="box">Hearts<div id="hudHearts"></div></div>
       <div id="dangerWrap">
         <div class="box" id="dangerLabel">Lead</div>
         <div id="dangerTrack"><div id="dangerBar"></div></div>
       </div>
       <button id="btnQuit" class="ghost">Give up</button>
+    </div>
+
+    <div class="hud2">
+      <div id="levelWrap">
+        <div id="levelLabel">Level 1 · 0 of 10</div>
+        <div id="levelTrack"><div id="levelBar"></div></div>
+      </div>
+      <div id="powerTray"></div>
     </div>
 
     <div id="problemCard">
@@ -360,12 +412,13 @@
   <section id="screen-over" class="screen">
     <div class="panelbox" id="overCard">
       <canvas id="overScene" aria-hidden="true"></canvas>
-      <div id="overTitle">Caught!</div>
+      <div id="overTitle">Out of hearts!</div>
       <p id="overSub"></p>
       <div class="stats">
         <div class="stat"><div class="v" id="overScore">0</div><div class="k">Score</div></div>
         <div class="stat"><div class="v" id="overBest">0</div><div class="k">Best</div></div>
-        <div class="stat"><div class="v" id="overSteps">0</div><div class="k">Steps taken</div></div>
+        <div class="stat"><div class="v" id="overLevel">1</div><div class="k">Level reached</div></div>
+        <div class="stat"><div class="v" id="overRight">0</div><div class="k">Facts right</div></div>
         <div class="stat"><div class="v" id="overAcc">0%</div><div class="k">Accuracy</div></div>
       </div>
       <div class="row center" style="margin-top:18px">
@@ -391,7 +444,14 @@ const TOKEN_KEY = 'cls_jwt';
 const SLUG      = 'math-facts';
 let ME = null;
 
+// Preview: play the game with nothing saved and no sign-in, so a change
+// can be tried before it goes live. Never on the family's own site.
+const PREVIEW_ARGS = new URLSearchParams(location.search);
+const PREVIEW = PREVIEW_ARGS.has('preview') && location.hostname !== 'darthkylej.github.io';
+const PREVIEW_STORE = {};
+
 async function api(method, path, body){
+  if(PREVIEW) return previewApi(method, path, body);
   const opts = { method, headers:{ 'Content-Type':'application/json' } };
   const token = localStorage.getItem(TOKEN_KEY);
   if(token) opts.headers['Authorization'] = 'Bearer ' + token;
@@ -406,6 +466,16 @@ async function api(method, path, body){
   }catch(e){ return { error:e.message || 'Network error' }; }
 }
 
+function previewApi(method, path, body){
+  if(path === '/auth/me') return { user:{ id:'preview', display_name:'Preview' } };
+  if(path.startsWith('/progress/')){
+    if(method === 'PUT'){ PREVIEW_STORE[path] = body.state; return { ok:true }; }
+    return { state:PREVIEW_STORE[path] || {} };
+  }
+  if(path === '/math/settings') return { settings:defaultSettings(), is_parent:false };
+  return { ok:true };
+}
+
 const $ = id => document.getElementById(id);
 const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
 const randInt = (a,b) => a + Math.floor(Math.random() * (b - a + 1));
@@ -415,7 +485,8 @@ const rand    = (a,b) => a + Math.random() * (b - a);
    Saved state — best score, lifetime counters, mute
 ══════════════════════════════════════════════════════════════ */
 const SAVE = {
-  best:0, runs:0, furthest:0,
+  best:0, runs:0, furthest:0,     // most facts right in a run, runs, most steps (the Flight Deck reads these)
+  bestPts:0, bestLevel:1,         // best points and highest level, for the game's own menu
   muted:false
 };
 let saveTimer = null;
@@ -426,6 +497,8 @@ async function loadSave(){
   SAVE.best     = s.best     | 0;
   SAVE.runs     = s.runs     | 0;
   SAVE.furthest = s.furthest | 0;
+  SAVE.bestPts   = s.bestPts   | 0;
+  SAVE.bestLevel = Math.max(1, s.bestLevel | 0);
   // s.ops is deliberately ignored and no longer written. Which operations
   // a learner practises moved to math_fact_settings, where a parent sets
   // it; older rows still carry the field and it means nothing now.
@@ -487,6 +560,27 @@ const Sound = (function(){
     caught(){
       tone({ freq:220, slide:55, dur:0.75, vol:0.22, type:'sawtooth' });
       tone({ freq:110, slide:40, dur:0.9,  vol:0.16, type:'square', at:0.06 });
+    },
+    zap(){
+      tone({ freq:1760, slide:440, dur:0.12, vol:0.07, type:'square' });
+    },
+    hit(){
+      tone({ freq:160, slide:70, dur:0.18, vol:0.18, type:'triangle' });
+    },
+    power(){
+      [659.25, 830.61, 987.77, 1318.5, 1661.2].forEach((f,i) =>
+        tone({ freq:f, dur:0.16, vol:0.12, type:'square', at:i * 0.06 }));
+    },
+    shield(){
+      tone({ freq:520, slide:1400, dur:0.3, vol:0.12, type:'sine' });
+      tone({ freq:780, slide:2100, dur:0.3, vol:0.06, type:'triangle', at:0.04 });
+    },
+    boss(){
+      tone({ freq:90,  slide:60, dur:0.9, vol:0.22, type:'sawtooth' });
+      tone({ freq:135, slide:80, dur:0.9, vol:0.12, type:'square', at:0.15 });
+    },
+    bossFire(){
+      tone({ freq:600, slide:80, dur:0.45, vol:0.16, type:'sawtooth' });
     }
   };
 })();
@@ -588,42 +682,71 @@ function rangeText(s, op){
 
 /* ══════════════════════════════════════════════════════════════
    Game state
+
+   A run is a string of levels. Ten right answers clear a level; every
+   third level ends in a boss. The monster speeds up a little within a
+   level and a little more each level, but resets its pace when a new
+   level starts, so a steady runner can keep going for a long time.
+   Three hearts: a catch costs one and knocks the monster back, rather
+   than ending the run on the spot.
 ══════════════════════════════════════════════════════════════ */
-const START_LEAD = 6;      // steps of head start
-const MAX_LEAD   = 10;     // beyond this the camera stops pulling back
+const START_LEAD   = 6;      // steps of head start, and where a catch knocks it back to
+const MAX_LEAD     = 10;     // beyond this the camera stops pulling back
+const LEVEL_GOAL   = 10;     // right answers per level
+const BOSS_EVERY   = 3;      // every third level ends with a boss
+const START_HEARTS = 3;
+const MAX_HEARTS   = 5;
+const STREAK_DROP  = 5;      // a power-up every five in a row
 
 const G = {
   running:false, paused:false, over:false,
   runner:0, monster:0,            // position in steps
   runnerDraw:0, monsterDraw:0,    // eased positions for rendering
-  speed:0, elapsed:0,
+  speed:0, elapsed:0, levelT:0,
   score:0, streak:0, bestStreak:0, steps:0, asked:0, right:0,
-  problem:null, retry:false, locked:false,
+  level:1, levelRight:0, hearts:START_HEARTS, invuln:0,
+  power:{ boots:0, board:0, blaster:0, shield:0 },
+  enemies:[], enemyTimer:6, shots:[], boss:null, bossesBeaten:0,
+  problem:null, problemAt:0, retry:false, locked:false,
   beatBest:false,
-  runPhase:0, monPhase:0, scroll:0, shake:0,
+  runPhase:0, monPhase:0, scroll:0, shake:0, lift:0,
   // Short-lived reaction timers, all counted down in the frame loop.
-  // They are what turns a right or wrong answer into something the
-  // runner visibly does, rather than a number that changes.
-  boost:0, stumble:0, monsterLunge:0, catchAnim:0,
+  boost:0, stumble:0, monsterLunge:0, catchAnim:0, hurtFlash:0,
   menuT:0                         // the menu banner's own clock
 };
 
 function resetGame(){
+  const startLevel = PREVIEW ? clamp(parseInt(PREVIEW_ARGS.get('level') || '1', 10) || 1, 1, 30) : 1;
   G.running = true; G.paused = false; G.over = false;
   G.runner = START_LEAD; G.monster = 0;
   G.runnerDraw = START_LEAD; G.monsterDraw = 0;
-  G.speed = 0; G.elapsed = 0;
+  G.speed = 0; G.elapsed = 0; G.levelT = 0;
   G.score = 0; G.streak = 0; G.bestStreak = 0; G.steps = 0; G.asked = 0; G.right = 0;
+  G.level = startLevel; G.levelRight = 0; G.hearts = START_HEARTS; G.invuln = 0;
+  G.power = { boots:0, board:0, blaster:0, shield:0 };
+  G.enemies = []; G.enemyTimer = 6; G.shots = []; G.boss = null; G.bossesBeaten = 0;
   G.problem = null; G.retry = false; G.locked = false;
-  G.beatBest = false; G.shake = 0;
-  G.boost = 0; G.stumble = 0; G.monsterLunge = 0; G.catchAnim = 0;
+  G.beatBest = false; G.shake = 0; G.lift = 0;
+  G.boost = 0; G.stumble = 0; G.monsterLunge = 0; G.catchAnim = 0; G.hurtFlash = 0;
   particles.length = 0;
 }
 
-// The monster accelerates with both wall-clock time and how well you
-// are doing, so a strong run stays tense instead of running away.
+// Steps per second. A fresh base every level, a gentle climb within it,
+// and a cap so it never outruns a child who is answering steadily.
 function monsterSpeed(){
-  return Math.min(2.4, 0.20 + 0.0040 * G.elapsed + 0.010 * G.score);
+  if(G.invuln > 0) return 0;
+  const base = Math.min(0.62, 0.17 + 0.035 * (G.level - 1));
+  const ramp = Math.min(0.12, 0.0035 * G.levelT);
+  let v = base + ramp;
+  if(G.power.board > 0) v *= 0.5;
+  if(G.boss) v *= 0.55;
+  return v;
+}
+
+// What counts as fast. Big-number adding takes longer to do in your
+// head than a times-table fact, so it gets more room.
+function fastLimit(p){
+  return (p.op === 'mul' || p.op === 'div') ? 3.5 : 5;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -654,6 +777,7 @@ function renderProblem(){
 function nextProblem(){
   if(!G.retry) G.problem = makeProblem();
   G.locked = false;
+  G.problemAt = G.elapsed;
   $('problemCard').className = '';
   $('verdict').className = '';
   $('verdict').innerHTML = '&nbsp;';
@@ -681,6 +805,8 @@ function submitAnswer(){
   const given = parseInt(raw, 10);
   const p = G.problem;
   const ok = given === p.answer;
+  // A retried problem is not fast: they were just shown the answer.
+  const fast = ok && !G.retry && (G.elapsed - G.problemAt) <= fastLimit(p);
 
   G.locked = true;
   el.disabled = true;
@@ -688,19 +814,40 @@ function submitAnswer(){
 
   if(ok){
     G.right++;
-    G.score++;
     G.streak++;
     G.bestStreak = Math.max(G.bestStreak, G.streak);
-    G.steps++;
-    G.runner = Math.min(G.runner + 1, G.monster + MAX_LEAD);
+    let jump = 1 + (fast ? 0.5 : 0);
+    if(G.power.boots > 0){ jump += 1; G.power.boots--; }
+    G.steps += jump;
+    G.runner = Math.min(G.runner + jump, G.monster + MAX_LEAD);
+    G.score += 10 + (fast ? 5 : 0);
     G.retry = false;
     G.boost = 0.38;
     spawnBoostBurst();
     Sound.correct();
+
+    // Every right answer fires: at the boss if there is one, otherwise
+    // at the nearest blob. The blaster also fires backwards at the monster.
+    if(G.boss) hitBoss(fast ? 2 : 1);
+    else zapNearestEnemy();
+    if(G.power.blaster > 0){
+      G.power.blaster--;
+      blastMonster();
+    }
+
     $('problemCard').className = 'right';
     $('verdict').className = 'right';
-    $('verdict').textContent = pickPraise();
-    if(!G.beatBest && SAVE.best > 0 && G.score > SAVE.best){
+    $('verdict').textContent = fast ? pickFast() : pickPraise();
+
+    if(G.streak % STREAK_DROP === 0) grantPowerup(G.streak + ' in a row!');
+    if(!G.boss && !G.over){
+      G.levelRight++;
+      if(G.levelRight >= LEVEL_GOAL){
+        if(G.level % BOSS_EVERY === 0) spawnBoss();
+        else levelUp();
+      }
+    }
+    if(!G.beatBest && SAVE.bestPts > 0 && G.score > SAVE.bestPts){
       G.beatBest = true;
       flashBestBanner();
       Sound.fanfare();
@@ -721,12 +868,15 @@ function submitAnswer(){
 
   updateHud();
   updateDanger();
-  if(G.runner <= G.monster){ endRun(); return; }
+  if(G.runner <= G.monster) caught();
+  if(G.over) return;
   setTimeout(() => { if(G.running && !G.over) nextProblem(); }, ok ? 480 : 1050);
 }
 
-const PRAISE = ['Nice!','Got it!','Yes!','Clean.','Sharp!','Keep going!','Fast!'];
+const PRAISE = ['Nice!','Got it!','Yes!','Clean.','Sharp!','Keep going!'];
+const FAST   = ['Fast!','Lightning!','Zoom!','Quick!','Speedy!'];
 function pickPraise(){ return PRAISE[randInt(0, PRAISE.length - 1)]; }
+function pickFast(){ return FAST[randInt(0, FAST.length - 1)] + ' +5'; }
 
 function flashBestBanner(){
   const b = $('bestBanner');
@@ -734,10 +884,318 @@ function flashBestBanner(){
   setTimeout(() => b.classList.remove('show'), 1900);
 }
 
+// A short message over the corridor. One at a time; a newer one wins.
+let popTimer = null;
+function pop(text, sub, tone, ms){
+  const b = $('popBanner');
+  b.className = tone || '';
+  b.innerHTML = esc(text) + (sub ? '<small>' + esc(sub) + '</small>' : '');
+  void b.offsetWidth;
+  b.classList.add('show');
+  clearTimeout(popTimer);
+  popTimer = setTimeout(() => b.classList.remove('show'), ms || 1500);
+}
+
+/* ── Hearts ───────────────────────────────────────────────────── */
+function caught(){
+  if(G.over || G.invuln > 0) return;
+  if(G.power.shield > 0){
+    G.power.shield = 0;
+    G.monster = G.runner - 3;
+    G.invuln = 1.2;
+    G.shake = 0.4;
+    spawnShieldBurst();
+    Sound.shield();
+    pop('Shield blocked it!', null, 'green');
+    updateHud();
+    return;
+  }
+  G.hearts--;
+  if(G.hearts <= 0){ G.hearts = 0; updateHud(); endRun(); return; }
+  G.monster = G.runner - START_LEAD;          // knocked back for a fresh start
+  G.invuln = 2;
+  G.shake = 0.6; G.hurtFlash = 1; G.monsterLunge = 1;
+  spawnCatchBurst();
+  Sound.caught();
+  pop('Ouch!', G.hearts === 1 ? 'Last heart. Be careful!' : G.hearts + ' hearts left', 'red', 1700);
+  $('hudHearts').classList.remove('hurt'); void $('hudHearts').offsetWidth;
+  $('hudHearts').classList.add('hurt');
+  updateHud();
+}
+
+// Something hit the runner from in front: knocked back, maybe caught.
+function knockBack(steps){
+  if(G.power.shield > 0 && steps >= 2){
+    G.power.shield = 0;
+    spawnShieldBurst();
+    Sound.shield();
+    pop('Shield blocked it!', null, 'green');
+    updateHud();
+    return;
+  }
+  G.runner -= steps;
+  G.stumble = 0.55; G.shake = Math.max(G.shake, 0.3);
+  spawnStumbleSparks();
+  Sound.hit();
+  updateDanger();
+  if(G.runner <= G.monster) caught();
+}
+
+/* ── Levels ───────────────────────────────────────────────────── */
+// The level changes at once; only the announcement waits, after a boss,
+// so it does not talk over the boss's own exit.
+function levelUp(afterBoss){
+  G.level++;
+  G.levelRight = 0;
+  G.levelT = 0;
+  const bonus = 25 * (G.level - 1);
+  G.score += bonus;
+  G.monster = Math.min(G.monster, G.runner - START_LEAD);
+  const lvl = G.level, wait = afterBoss ? 2100 : 0;
+  setTimeout(() => {
+    if(!G.running || G.over || G.level !== lvl) return;
+    if(!afterBoss) Sound.fanfare();
+    pop('Level ' + lvl + '!', '+' + bonus + ' points', 'gold', 1600);
+  }, wait);
+  setTimeout(() => { if(G.running && !G.over && G.level === lvl) grantPowerup('Level bonus'); }, wait + 1700);
+  updateHud();
+}
+
+/* ── Power-ups ────────────────────────────────────────────────── */
+const POWERS = {
+  boots:   { name:'Speed Boots', icon:'👟', note:'Double jumps for 8 answers' },
+  board:   { name:'Hover Board', icon:'🛹', note:'Monster slowed for 20 seconds' },
+  blaster: { name:'Blaster',     icon:'⚡', note:'Next 5 answers zap the monster back' },
+  shield:  { name:'Shield',      icon:'🛡️', note:'Blocks one catch' },
+  heart:   { name:'Extra Heart', icon:'❤️', note:'+1 heart' },
+};
+
+function grantPowerup(why){
+  const pool = ['boots','boots','board','board','blaster','blaster','shield'];
+  if(G.hearts < MAX_HEARTS) pool.push('heart', G.hearts <= 1 ? 'heart' : 'shield');
+  const k = pool[randInt(0, pool.length - 1)];
+  if(k === 'boots')   G.power.boots   = 8;
+  if(k === 'board')   G.power.board   = 20;
+  if(k === 'blaster') G.power.blaster = 5;
+  if(k === 'shield')  G.power.shield  = 1;
+  if(k === 'heart')   G.hearts = Math.min(MAX_HEARTS, G.hearts + 1);
+  spawnPowerBurst();
+  Sound.power();
+  pop(POWERS[k].icon + ' ' + POWERS[k].name, (why ? why + ' · ' : '') + POWERS[k].note, 'green', 1900);
+  updateHud();
+}
+
+/* ── Blobs ────────────────────────────────────────────────────────
+   Little space blobs drift in from the right. A right answer zaps the
+   nearest; one that reaches the runner knocks them back a step. Their
+   positions are fractions of the canvas width, so a resize or a phone
+   turned sideways does not scatter them.
+───────────────────────────────────────────────────────────────── */
+const BLOB_COLORS = ['#34d399','#f5a524','#4fd1e0','#a78bfa','#f472b6','#facc15','#60a5fa','#fb923c','#a3e635','#e879f9'];
+const RUNNER_FX = 0.68;
+
+function spawnEnemy(){
+  const travel = Math.max(6.5, 10.5 - 0.4 * (G.level - 1));   // seconds to reach the runner
+  G.enemies.push({
+    fx:1.08, v:(1.08 - RUNNER_FX) / travel,
+    hy:rand(0.28, 0.55),                         // height above the floor, as a share of H
+    color:BLOB_COLORS[randInt(0, BLOB_COLORS.length - 1)],
+    kind:randInt(0, 2), phase:rand(0, 6), r:rand(0.8, 1.15)
+  });
+}
+
+function enemyXY(e){
+  return [e.fx * W, groundLine() - e.hy * H * 0.9 + Math.sin(e.phase * 2) * 6];
+}
+
+function zapNearestEnemy(){
+  if(!G.enemies.length) return;
+  let best = 0;
+  for(let i = 1; i < G.enemies.length; i++) if(G.enemies[i].fx < G.enemies[best].fx) best = i;
+  const e = G.enemies[best];
+  if(e.fx > 1.02) return;                       // not on screen yet
+  const [ex, ey] = enemyXY(e);
+  shot(runnerScreenX() + 14, groundLine() - 44 * runnerScale(), ex, ey, e.color);
+  popEnemy(e, ex, ey);
+  G.enemies.splice(best, 1);
+  G.score += 5;
+  Sound.zap();
+}
+
+function popEnemy(e, ex, ey){
+  for(let i = 0; i < 18; i++) particle({
+    x:ex, y:ey, vx:rand(-170, 170), vy:rand(-170, 120),
+    life:rand(.25, .6), maxLife:.6, r:rand(1.5, 3.5), gravity:160,
+    color:Math.random() < .7 ? e.color : '#eaf3ff'
+  });
+}
+
+function updateEnemies(dt){
+  if(G.boss){ G.enemies.length = 0; return; }
+  G.enemyTimer -= dt;
+  if(G.enemyTimer <= 0){
+    if(G.enemies.length < 3) spawnEnemy();
+    G.enemyTimer = rand(5, 8) - Math.min(2, 0.15 * G.level);
+  }
+  for(let i = G.enemies.length - 1; i >= 0; i--){
+    const e = G.enemies[i];
+    e.phase += dt;
+    e.fx -= e.v * dt;
+    if(e.fx <= RUNNER_FX + 0.025){
+      const [ex, ey] = enemyXY(e);
+      popEnemy(e, ex, ey);
+      G.enemies.splice(i, 1);
+      knockBack(0.75);
+      if(G.over) return;
+    }
+  }
+}
+
+/* ── Bosses ───────────────────────────────────────────────────── */
+const BOSSES = [
+  { name:'Glorp the Gigantic', color:'#34d399', dark:'#065f46' },
+  { name:'Queen Zibble',       color:'#f472b6', dark:'#831843' },
+  { name:'Count Crunchula',    color:'#a78bfa', dark:'#3b0764' },
+  { name:'Mega Blobzilla',     color:'#f5a524', dark:'#78350f' },
+  { name:'The Number Muncher', color:'#60a5fa', dark:'#1e3a8a' },
+];
+
+function spawnBoss(){
+  const n = G.bossesBeaten;
+  const look = BOSSES[n % BOSSES.length];
+  const hp = Math.min(18, 8 + 2 * n);
+  G.boss = { name:look.name, color:look.color, dark:look.dark, hp, max:hp,
+             charge:0, chargeMax:Math.max(10, 18 - n), enter:1, hit:0, fire:0, phase:0 };
+  G.enemies.forEach(e => { const [x, y] = enemyXY(e); popEnemy(e, x, y); });
+  G.enemies.length = 0;
+  Sound.boss();
+  pop('Boss: ' + look.name + '!', 'Answer fast to hit it twice', 'red', 2200);
+  updateHud();
+}
+
+function bossXY(){
+  const b = G.boss, s = bossScale();
+  const x = W * (0.88 + 0.25 * b.enter);
+  return [x, groundLine() - 46 * s + Math.sin(b.phase * 1.6) * 5];
+}
+function bossScale(){ return Math.max(0.9, H / 250); }
+
+function hitBoss(dmg){
+  const b = G.boss; if(!b) return;
+  const [bx, by] = bossXY();
+  shot(runnerScreenX() + 14, groundLine() - 44 * runnerScale(), bx - 20, by, '#fde68a');
+  if(dmg > 1) setTimeout(() => {
+    if(G.boss === b) shot(runnerScreenX() + 14, groundLine() - 40 * runnerScale(), bx - 20, by + 8, '#4fd1e0');
+  }, 90);
+  b.hp = Math.max(0, b.hp - dmg);
+  b.hit = 0.3;
+  for(let i = 0; i < 14 * dmg; i++) particle({
+    x:bx - 20, y:by, vx:rand(-60, 220), vy:rand(-160, 160),
+    life:rand(.2, .5), maxLife:.5, r:rand(1.5, 3.5), gravity:120,
+    color:Math.random() < .6 ? b.color : '#fde68a', shape:'streak'
+  });
+  Sound.zap();
+  if(b.hp <= 0) defeatBoss();
+}
+
+function defeatBoss(){
+  const b = G.boss;
+  const [bx, by] = bossXY();
+  for(let i = 0; i < 80; i++) particle({
+    x:bx + rand(-30, 30), y:by + rand(-30, 30), vx:rand(-320, 320), vy:rand(-300, 200),
+    life:rand(.5, 1.2), maxLife:1.2, r:rand(2, 5), gravity:140,
+    color:[b.color, '#fde68a', '#eaf3ff', b.dark][randInt(0, 3)]
+  });
+  G.bossesBeaten++;
+  const bonus = 50 * G.bossesBeaten;
+  G.score += bonus;
+  G.hearts = Math.min(MAX_HEARTS, G.hearts + 1);
+  G.boss = null;
+  G.shake = 0.6;
+  burstConfetti();
+  Sound.fanfare();
+  pop(b.name + ' defeated!', '+' + bonus + ' points · +1 heart', 'gold', 2000);
+  levelUp(true);
+}
+
+function updateBoss(dt){
+  const b = G.boss; if(!b) return;
+  b.phase += dt;
+  if(b.enter > 0) b.enter = Math.max(0, b.enter - dt * 0.9);
+  if(b.hit > 0) b.hit = Math.max(0, b.hit - dt);
+  if(b.fire > 0) b.fire = Math.max(0, b.fire - dt * 1.6);
+  if(b.enter > 0) return;
+  b.charge += dt;
+  if(b.charge >= b.chargeMax){
+    b.charge = 0;
+    b.fire = 1;
+    const [bx, by] = bossXY();
+    shot(bx - 30, by, runnerScreenX(), groundLine() - 36 * runnerScale(), '#fb7185', 7);
+    Sound.bossFire();
+    pop(b.name + ' blasts you!', 'Answer faster to beat it', 'red', 1400);
+    knockBack(2);
+  }
+}
+
+/* ── Shots ────────────────────────────────────────────────────── */
+function shot(x1, y1, x2, y2, color, width){
+  G.shots.push({ x1, y1, x2, y2, color, w:width || 3.5, life:0.22, maxLife:0.22 });
+}
+
+function blastMonster(){
+  const lead = G.runner - G.monster;
+  const back = Math.min(1.5, Math.max(0, MAX_LEAD - lead));
+  G.monster -= back;
+  const mx = runnerScreenX() - (G.runnerDraw - G.monsterDraw) * stepPx();
+  shot(runnerScreenX() - 16, groundLine() - 36 * runnerScale(), Math.max(10, mx + 10), groundLine() - 40, '#4fd1e0', 5);
+  G.monsterLunge = 0;
+  for(let i = 0; i < 14; i++) particle({
+    x:Math.max(10, mx + 10), y:groundLine() - 40, vx:rand(-200, 40), vy:rand(-120, 120),
+    life:rand(.2, .5), maxLife:.5, r:rand(1.5, 3), color:Math.random() < .6 ? '#4fd1e0' : '#eaf3ff'
+  });
+}
+
+function updateShots(dt){
+  for(let i = G.shots.length - 1; i >= 0; i--){
+    if((G.shots[i].life -= dt) <= 0) G.shots.splice(i, 1);
+  }
+}
+
+/* ── HUD ──────────────────────────────────────────────────────── */
+let lastHearts = '', lastPowers = '', lastLevelTxt = '', lastLevelPct = -1, lastBossMode = null;
 function updateHud(){
+  $('hudLevel').textContent  = G.level;
   $('hudScore').textContent  = G.score;
-  $('hudBest').textContent   = Math.max(SAVE.best, G.score);
+  $('hudBest').textContent   = Math.max(SAVE.bestPts, G.score);
   $('hudStreak').textContent = G.streak;
+
+  const hearts = Math.max(START_HEARTS, G.hearts);
+  let h = '';
+  for(let i = 0; i < hearts; i++) h += '<span class="h' + (i < G.hearts ? '' : ' off') + '">♥</span>';
+  if(h !== lastHearts){ $('hudHearts').innerHTML = h; lastHearts = h; }
+  updatePowerTray();
+  updateLevelBar();
+}
+
+function updatePowerTray(){
+  const P = G.power, chips = [];
+  if(P.boots   > 0) chips.push(['boots',   POWERS.boots.icon   + ' Boots ×' + P.boots]);
+  if(P.board   > 0) chips.push(['board',   POWERS.board.icon   + ' Board ' + Math.ceil(P.board) + 's']);
+  if(P.blaster > 0) chips.push(['blaster', POWERS.blaster.icon + ' Blaster ×' + P.blaster]);
+  if(P.shield  > 0) chips.push(['shield',  POWERS.shield.icon  + ' Shield']);
+  const html = chips.map(([k, t]) => '<span class="pchip ' + k + '">' + t + '</span>').join('');
+  if(html !== lastPowers){ $('powerTray').innerHTML = html; lastPowers = html; }
+}
+
+function updateLevelBar(){
+  const b = G.boss;
+  const txt = b ? 'Boss · ' + b.name + ' · ' + b.hp + ' HP'
+                : 'Level ' + G.level + ' · ' + G.levelRight + ' of ' + LEVEL_GOAL
+                  + (G.level % BOSS_EVERY === 0 ? ' · boss next' : '');
+  const pct = b ? Math.round(100 * b.hp / b.max) : Math.round(100 * G.levelRight / LEVEL_GOAL);
+  if(txt !== lastLevelTxt){ $('levelLabel').textContent = txt; lastLevelTxt = txt; }
+  if(pct !== lastLevelPct){ $('levelBar').style.width = pct + '%'; lastLevelPct = pct; }
+  if(!!b !== lastBossMode){ $('levelWrap').classList.toggle('boss', !!b); lastBossMode = !!b; }
 }
 
 // Runs every frame, so it only touches the DOM when something changed.
@@ -749,16 +1207,14 @@ function updateDanger(){
     $('dangerBar').style.width = pct + '%';
     lastDangerPct = pct;
   }
-  const panic = lead < 1.6;
+  const panic = lead < 1.6 && G.invuln <= 0;
   if(panic !== lastPanic){
     $('dangerLabel').textContent  = panic ? 'RUN!' : 'Lead';
     $('dangerLabel').style.color  = panic ? 'var(--magenta)' : '';
     $('dangerWrap').classList.toggle('panic', panic);
     lastPanic = panic;
   }
-  // The frame warms a little earlier than the label shouts, so there is
-  // a beat of "it is getting close" before the beat of "run".
-  const closing = lead < 2.2;
+  const closing = lead < 2.2 && G.invuln <= 0;
   if(closing !== lastClosing){
     $('sceneWrap').classList.toggle('panic', closing);
     lastClosing = closing;
@@ -781,9 +1237,12 @@ function startRun(){
   show('game');
   sizeCanvas();          // the scene measures 0 wide while its screen is hidden
   lastDangerPct = -1; lastPanic = null; lastClosing = null; lastSurge = null;
+  lastHearts = ''; lastPowers = ''; lastLevelTxt = ''; lastLevelPct = -1; lastBossMode = null;
+  $('popBanner').className = '';
   updateHud();
   updateDanger();
   nextProblem();
+  pop('Level ' + G.level, 'Answer ' + LEVEL_GOAL + ' right to clear it', '', 1600);
 }
 
 function endRun(){
@@ -792,25 +1251,30 @@ function endRun(){
   G.catchAnim = 1; G.shake = 0.85; G.monsterLunge = 1;
   spawnCatchBurst();
   Sound.caught();
+  $('popBanner').classList.remove('show');
 
-  const record = G.score > SAVE.best;
-  if(record) SAVE.best = G.score;
-  SAVE.furthest = Math.max(SAVE.furthest, G.steps);
+  const record = G.score > SAVE.bestPts;
+  if(record) SAVE.bestPts = G.score;
+  SAVE.bestLevel = Math.max(SAVE.bestLevel, G.level);
+  // `best` and `furthest` are what the Flight Deck shows a parent:
+  // the most facts answered right in one run, and the most steps.
+  SAVE.best     = Math.max(SAVE.best, G.right);
+  SAVE.furthest = Math.max(SAVE.furthest, Math.round(G.steps));
   persist();
 
   const acc = G.asked ? Math.round(100 * G.right / G.asked) : 0;
   $('overScore').textContent = G.score;
-  $('overBest').textContent  = SAVE.best;
-  $('overSteps').textContent = G.steps;
+  $('overBest').textContent  = SAVE.bestPts;
+  $('overLevel').textContent = G.level;
+  $('overRight').textContent = G.right;
   $('overAcc').textContent   = acc + '%';
-  $('overTitle').textContent = record ? '★ New best score! ★' : 'Caught!';
+  $('overTitle').textContent = record ? '★ New best score! ★' : 'Out of hearts!';
   $('overTitle').className   = record ? 'record' : '';
-  $('overSub').textContent   = record
-    ? 'That is the furthest anyone has stayed ahead on this account. Best streak: ' + G.bestStreak + ' in a row.'
-    : 'The monster got you at ' + G.score + '. Best streak this run: ' + G.bestStreak + '. Best score to beat: ' + SAVE.best + '.';
+  $('overSub').textContent   = 'You reached level ' + G.level
+    + (G.bossesBeaten ? ' and beat ' + G.bossesBeaten + ' boss' + (G.bossesBeaten === 1 ? '' : 'es') : '')
+    + '. Best streak: ' + G.bestStreak + ' in a row.'
+    + (record ? '' : ' Score to beat: ' + SAVE.bestPts + '.');
 
-  // Long enough to watch the thing actually catch you. Cutting to the
-  // card at 850ms clipped the lunge halfway through.
   setTimeout(() => {
     show('over');
     drawOverScene(record);
@@ -913,6 +1377,27 @@ function spawnCatchBurst(){
   });
 }
 
+function runnerScale(){ return Math.max(0.86, H / 285); }
+
+function spawnPowerBurst(){
+  const x = runnerScreenX(), y = groundLine() - 40 * runnerScale();
+  for(let i = 0; i < 36; i++){
+    const a = rand(0, Math.PI * 2), v = rand(80, 220);
+    particle({ x, y, vx:Math.cos(a) * v, vy:Math.sin(a) * v, life:rand(.35, .8), maxLife:.8,
+      r:rand(1.5, 3.5), drag:1.2, color:['#34d399','#f5a524','#4fd1e0','#a78bfa'][randInt(0, 3)] });
+  }
+}
+
+function spawnShieldBurst(){
+  const x = runnerScreenX(), y = groundLine() - 40 * runnerScale();
+  for(let i = 0; i < 30; i++){
+    const a = rand(0, Math.PI * 2), v = rand(120, 260);
+    particle({ x:x + Math.cos(a) * 30, y:y + Math.sin(a) * 30, vx:Math.cos(a) * v, vy:Math.sin(a) * v,
+      life:rand(.3, .6), maxLife:.6, r:rand(1.5, 3), drag:2, shape:'streak',
+      color:Math.random() < .6 ? '#a78bfa' : '#eaf3ff' });
+  }
+}
+
 function updateParticles(dt){
   for(let i = particles.length - 1; i >= 0; i--){
     const p = particles[i];
@@ -968,7 +1453,7 @@ function drawScene(){
 
   const sky = cx.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, '#040814');
-  sky.addColorStop(0.48, danger > .55 ? '#120914' : '#081127');
+  sky.addColorStop(0.48, danger > .55 ? '#120914' : (G.boss ? '#160a1c' : LEVEL_SKY[(G.level - 1) % LEVEL_SKY.length]));
   sky.addColorStop(1, '#04070e');
   cx.fillStyle = sky; cx.fillRect(0, 0, W, H);
 
@@ -987,8 +1472,23 @@ function drawScene(){
   if(G.monsterLunge > 0) mx += Math.sin((1 - G.monsterLunge) * Math.PI) * 24 * clamp(G.monsterLunge * 2, 0, 1);
 
   drawMonster(mx, groundY, G.monPhase, lead, danger, G.catchAnim);
+  drawEnemies();
+  if(G.boss) drawBoss();
+  // Blink while the runner cannot be caught, right after losing a heart.
+  const blink = G.invuln > 0 && Math.floor(G.invuln * 10) % 2 === 0;
+  cx.save();
+  if(blink) cx.globalAlpha = 0.35;
+  drawRunnerGear(rx, groundY, 'back');
   drawRunner(rx, groundY, G.runPhase, streakGlow);
+  drawRunnerGear(rx, groundY, 'front');
+  cx.restore();
+  drawShots();
   drawParticles(cx);
+  if(G.boss) drawBossBar();
+  if(G.hurtFlash > 0){
+    cx.fillStyle = 'rgba(251,113,133,' + (0.22 * G.hurtFlash) + ')';
+    cx.fillRect(0, 0, W, H);
+  }
 
   // Off-screen marker when the monster is far enough back to leave the frame
   if(mx < -35){
@@ -1178,7 +1678,7 @@ function drawRunner(x, groundY, phase, streakGlow){
   const stumble = clamp(G.stumble / 0.55, 0, 1);
   const lit  = Math.max(streakGlow, boost);
   const tilt = stumble * Math.sin((1 - stumble) * Math.PI) * 0.34;
-  const hipY = groundY - 48 * s - bob + stumble * 4 * s;
+  const hipY = groundY - 48 * s - bob + stumble * 4 * s - G.lift * 14 * s;
 
   // Shadow stays flat on the floor, so it is drawn before the tilt.
   cx.save();
@@ -1285,6 +1785,205 @@ function drawRunner(x, groundY, phase, streakGlow){
     cx.restore();
   }
 
+  cx.restore();
+}
+
+const LEVEL_SKY = ['#081127', '#0b1530', '#071a24', '#10112e', '#0a1a1a', '#161029', '#0c1428'];
+
+/* Power-up gear on the runner: the board under the feet, glowing boots,
+   the blaster on the back, and the shield bubble around them. Drawn in
+   the same frame of reference as drawRunner. */
+function drawRunnerGear(x, groundY, layer){
+  const s = runnerScale(), P = G.power, t = G.elapsed;
+  cx.save();
+  if(layer === 'back'){
+    if(G.lift > 0.05){
+      const y = groundY - G.lift * 12 * s + Math.sin(t * 6) * 1.5;
+      cx.globalAlpha *= G.lift;
+      cx.save();
+      cx.globalCompositeOperation = 'lighter';
+      const g = cx.createRadialGradient(x, y + 6 * s, 2, x, y + 6 * s, 30 * s);
+      g.addColorStop(0, 'rgba(52,211,153,.55)'); g.addColorStop(1, 'rgba(52,211,153,0)');
+      cx.fillStyle = g; cx.fillRect(x - 34 * s, y - 6 * s, 68 * s, 30 * s);
+      cx.restore();
+      cx.fillStyle = '#10b981';
+      roundRectPath(cx, x - 26 * s, y - 3 * s, 52 * s, 7 * s, 3.5 * s); cx.fill();
+      cx.fillStyle = '#d1fae5';
+      cx.fillRect(x - 18 * s, y - 2 * s, 36 * s, 2 * s);
+      cx.fillStyle = 'rgba(110,231,183,.9)';
+      cx.beginPath(); cx.arc(x - 18 * s, y + 5 * s, 2.5 * s, 0, Math.PI * 2);
+      cx.arc(x + 18 * s, y + 5 * s, 2.5 * s, 0, Math.PI * 2); cx.fill();
+    }
+  }else{
+    if(P.boots > 0){
+      cx.save();
+      cx.globalCompositeOperation = 'lighter';
+      const fy = groundY - G.lift * 14 * s - 3 * s;
+      for(let i = 0; i < 4; i++){
+        cx.fillStyle = 'rgba(245,165,36,' + (0.28 - i * 0.06) + ')';
+        cx.beginPath(); cx.ellipse(x - (6 + i * 9) * s, fy, (9 - i) * s, 3.2 * s, 0, 0, Math.PI * 2); cx.fill();
+      }
+      cx.restore();
+    }
+    if(P.blaster > 0){
+      const hy = groundY - 48 * s - G.lift * 14 * s - 22 * s;
+      cx.fillStyle = '#334155';
+      roundRectPath(cx, x - 30 * s, hy, 18 * s, 6 * s, 2 * s); cx.fill();
+      cx.fillStyle = 'rgba(79,209,224,' + (0.6 + 0.4 * Math.sin(t * 8)) + ')';
+      cx.fillRect(x - 33 * s, hy + 1.5 * s, 4 * s, 3 * s);
+    }
+    if(P.shield > 0){
+      const cy = groundY - 44 * s - G.lift * 14 * s;
+      cx.save();
+      cx.globalCompositeOperation = 'lighter';
+      cx.strokeStyle = 'rgba(167,139,250,' + (0.45 + 0.2 * Math.sin(t * 4)) + ')';
+      cx.lineWidth = 2.5 * s;
+      cx.beginPath(); cx.arc(x, cy, 40 * s, 0, Math.PI * 2); cx.stroke();
+      cx.fillStyle = 'rgba(167,139,250,.07)';
+      cx.fill();
+      cx.restore();
+    }
+  }
+  cx.restore();
+}
+
+// Space blobs, three kinds, every colour of the rainbow.
+function drawEnemies(){
+  const s = runnerScale();
+  for(const e of G.enemies){
+    const [x, y] = enemyXY(e);
+    if(x > W + 40) continue;
+    const r = 13 * s * e.r;
+    cx.save();
+    cx.translate(x, y);
+    cx.save();
+    cx.globalCompositeOperation = 'lighter';
+    const g = cx.createRadialGradient(0, 0, 2, 0, 0, r * 2.2);
+    g.addColorStop(0, e.color + '66'); g.addColorStop(1, e.color + '00');
+    cx.fillStyle = g; cx.fillRect(-r * 2.4, -r * 2.4, r * 4.8, r * 4.8);
+    cx.restore();
+    cx.fillStyle = e.color;
+    if(e.kind === 0){                       // round blob with wobbly feet
+      cx.beginPath(); cx.arc(0, 0, r, 0, Math.PI * 2); cx.fill();
+      for(let i = -1; i <= 1; i++){
+        cx.beginPath(); cx.arc(i * r * .55, r * .85 + Math.sin(e.phase * 8 + i) * 2, r * .28, 0, Math.PI * 2); cx.fill();
+      }
+    }else if(e.kind === 1){                 // saucer
+      cx.beginPath(); cx.ellipse(0, r * .2, r * 1.35, r * .5, 0, 0, Math.PI * 2); cx.fill();
+      cx.fillStyle = 'rgba(234,243,255,.55)';
+      cx.beginPath(); cx.arc(0, -r * .1, r * .62, Math.PI, 0); cx.fill();
+      cx.fillStyle = e.color;
+    }else{                                  // spiky star
+      cx.beginPath();
+      for(let i = 0; i < 10; i++){
+        const a = i * Math.PI / 5 + e.phase, rr = i % 2 ? r * .6 : r * 1.15;
+        cx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      cx.closePath(); cx.fill();
+    }
+    // Eyes, looking at the runner
+    cx.fillStyle = '#ffffff';
+    cx.beginPath(); cx.arc(-r * .35, -r * .15, r * .28, 0, Math.PI * 2); cx.arc(r * .15, -r * .15, r * .28, 0, Math.PI * 2); cx.fill();
+    cx.fillStyle = '#0b1020';
+    cx.beginPath(); cx.arc(-r * .45, -r * .12, r * .13, 0, Math.PI * 2); cx.arc(r * .05, -r * .12, r * .13, 0, Math.PI * 2); cx.fill();
+    cx.restore();
+  }
+}
+
+function drawBoss(){
+  const b = G.boss, s = bossScale();
+  const [x, y] = bossXY();
+  const hit = b.hit > 0, charge = b.charge / b.chargeMax;
+  cx.save();
+  cx.translate(x + (hit ? rand(-3, 3) : 0), y);
+
+  cx.fillStyle = 'rgba(0,0,0,.5)';
+  cx.beginPath(); cx.ellipse(0, groundLine() - y + 3, 40 * s, 7 * s, 0, 0, Math.PI * 2); cx.fill();
+
+  // Charging glow, building to the blast
+  cx.save();
+  cx.globalCompositeOperation = 'lighter';
+  const glow = cx.createRadialGradient(0, 0, 8 * s, 0, 0, 70 * s);
+  glow.addColorStop(0, 'rgba(251,113,133,' + (0.08 + 0.35 * charge + 0.4 * b.fire) + ')');
+  glow.addColorStop(1, 'rgba(251,113,133,0)');
+  cx.fillStyle = glow; cx.fillRect(-80 * s, -80 * s, 160 * s, 160 * s);
+  cx.restore();
+
+  const body = cx.createRadialGradient(-10 * s, -14 * s, 4 * s, 0, 0, 44 * s);
+  body.addColorStop(0, hit ? '#ffffff' : '#ffffffaa');
+  body.addColorStop(.25, b.color); body.addColorStop(1, b.dark);
+  cx.fillStyle = body;
+  cx.beginPath(); cx.ellipse(0, 0, 40 * s, 36 * s, 0, 0, Math.PI * 2); cx.fill();
+
+  // Crown
+  cx.fillStyle = '#facc15';
+  cx.beginPath();
+  cx.moveTo(-20 * s, -30 * s); cx.lineTo(-22 * s, -50 * s); cx.lineTo(-10 * s, -40 * s);
+  cx.lineTo(0, -54 * s); cx.lineTo(10 * s, -40 * s); cx.lineTo(22 * s, -50 * s); cx.lineTo(20 * s, -30 * s);
+  cx.closePath(); cx.fill();
+  cx.fillStyle = '#fb7185';
+  cx.beginPath(); cx.arc(0, -40 * s, 3 * s, 0, Math.PI * 2); cx.fill();
+
+  // Eyes looking left at the runner, angry brows
+  cx.fillStyle = '#ffffff';
+  cx.beginPath(); cx.arc(-16 * s, -6 * s, 9 * s, 0, Math.PI * 2); cx.arc(6 * s, -6 * s, 9 * s, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = '#0b1020';
+  cx.beginPath(); cx.arc(-19 * s, -5 * s, 4.2 * s, 0, Math.PI * 2); cx.arc(3 * s, -5 * s, 4.2 * s, 0, Math.PI * 2); cx.fill();
+  cx.strokeStyle = '#0b1020'; cx.lineWidth = 3 * s; cx.lineCap = 'round';
+  cx.beginPath(); cx.moveTo(-26 * s, -18 * s); cx.lineTo(-10 * s, -13 * s);
+  cx.moveTo(16 * s, -18 * s); cx.lineTo(0, -13 * s); cx.stroke();
+  // Mouth, opening as it charges
+  cx.fillStyle = '#1a0610';
+  cx.beginPath(); cx.ellipse(-6 * s, 16 * s, 16 * s, (3 + 8 * charge + 6 * b.fire) * s, 0, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = '#fff1f2';
+  for(let i = 0; i < 5; i++){
+    cx.beginPath();
+    cx.moveTo((-18 + i * 6) * s, (13 - 3 * charge) * s);
+    cx.lineTo((-15 + i * 6) * s, (18 - 3 * charge) * s);
+    cx.lineTo((-12 + i * 6) * s, (13 - 3 * charge) * s);
+    cx.fill();
+  }
+  cx.restore();
+}
+
+// The boss's health and charge, across the top of the corridor, clear
+// of the hearts (which live in the HUD under the scene).
+function drawBossBar(){
+  const b = G.boss;
+  const w = Math.min(W * 0.62, 420), x = (W - w) / 2, y = 10;
+  cx.save();
+  cx.fillStyle = 'rgba(4,7,15,.75)';
+  roundRectPath(cx, x - 8, y - 4, w + 16, 34, 6); cx.fill();
+  cx.font = '700 10px ' + getComputedStyle(document.body).fontFamily;
+  cx.textAlign = 'left'; cx.fillStyle = '#fde68a';
+  cx.fillText(b.name.toUpperCase(), x, y + 7);
+  cx.textAlign = 'right'; cx.fillStyle = '#eaf3ff';
+  cx.fillText(b.hp + ' / ' + b.max, x + w, y + 7);
+  cx.fillStyle = 'rgba(251,113,133,.18)';
+  cx.fillRect(x, y + 11, w, 8);
+  cx.fillStyle = b.color;
+  cx.fillRect(x, y + 11, w * b.hp / b.max, 8);
+  // Charge line: when it fills, the boss blasts you back
+  cx.fillStyle = 'rgba(251,113,133,.15)';
+  cx.fillRect(x, y + 22, w, 3);
+  cx.fillStyle = '#fb7185';
+  cx.fillRect(x, y + 22, w * clamp(b.charge / b.chargeMax, 0, 1), 3);
+  cx.restore();
+}
+
+function drawShots(){
+  if(!G.shots.length) return;
+  cx.save();
+  cx.globalCompositeOperation = 'lighter';
+  cx.lineCap = 'round';
+  for(const sh of G.shots){
+    const a = clamp(sh.life / sh.maxLife, 0, 1);
+    cx.globalAlpha = a;
+    cx.strokeStyle = sh.color; cx.lineWidth = sh.w * (0.6 + a);
+    cx.beginPath(); cx.moveTo(sh.x1, sh.y1); cx.lineTo(sh.x2, sh.y2); cx.stroke();
+    cx.strokeStyle = '#ffffff'; cx.lineWidth = sh.w * 0.35;
+    cx.stroke();
+  }
   cx.restore();
 }
 
@@ -1511,14 +2210,29 @@ function frame(now){
 
   if(G.running && !G.paused && !G.over){
     G.elapsed += dt;
+    if(!G.boss) G.levelT += dt;
+    if(G.invuln > 0) G.invuln = Math.max(0, G.invuln - dt);
+    if(G.power.board > 0){
+      const before = Math.ceil(G.power.board);
+      G.power.board = Math.max(0, G.power.board - dt);
+      if(Math.ceil(G.power.board) !== before) updatePowerTray();
+    }
+    // Right after a catch nothing can catch you again, even a stumble.
+    if(G.invuln > 0 && G.runner < G.monster + 0.3) G.monster = G.runner - 0.3;
     G.speed = monsterSpeed();
     G.monster += G.speed * dt;
     if(G.monster >= G.runner){
       G.monster = G.runner;
-      endRun();
+      caught();
     }
+    if(!G.over) updateEnemies(dt);
+    if(!G.over) updateBoss(dt);
+    if(G.boss && !G.over) updateLevelBar();
     updateDanger();
   }
+  updateShots(dt);
+  // Riding the board lifts the runner off the floor; it eases on and off.
+  G.lift += ((G.power.board > 0 && !G.over ? 1 : 0) - G.lift) * Math.min(1, dt * 6);
 
   // Eased draw positions so steps glide instead of snapping. A boosted
   // step catches up faster, which is what makes it read as a surge.
@@ -1538,6 +2252,7 @@ function frame(now){
   if(G.stumble > 0)      G.stumble      = Math.max(0, G.stumble - dt);
   if(G.monsterLunge > 0) G.monsterLunge = Math.max(0, G.monsterLunge - dt * 1.2);
   if(G.catchAnim > 0)    G.catchAnim    = Math.max(0, G.catchAnim - dt * 0.9);
+  if(G.hurtFlash > 0)    G.hurtFlash    = Math.max(0, G.hurtFlash - dt * 1.6);
   updateParticles(dt);
 
   if($('screen-game').classList.contains('active')) drawScene();
@@ -1606,9 +2321,10 @@ document.addEventListener('keydown', e => {
    Menu wiring
 ══════════════════════════════════════════════════════════════ */
 function renderMenu(){
-  $('menuBest').textContent = SAVE.best;
-  $('menuRuns').textContent = SAVE.runs;
-  $('menuFar').textContent  = SAVE.furthest;
+  $('menuBest').textContent  = SAVE.bestPts;
+  $('menuLevel').textContent = SAVE.bestLevel;
+  $('menuRight').textContent = SAVE.best;
+  $('menuRuns').textContent  = SAVE.runs;
 
   // Only what they are actually being asked. An operation nobody has
   // assigned them is not a locked door to rattle, it is just absent.
@@ -1839,7 +2555,7 @@ $('btnMute').addEventListener('click', () => {
 ══════════════════════════════════════════════════════════════ */
 async function boot(){
   const token = localStorage.getItem(TOKEN_KEY);
-  if(!token){ location.href = '../index.html'; return; }
+  if(!token && !PREVIEW){ location.href = '../index.html'; return; }
   const me = await api('GET', '/auth/me');
   if(me.error || !me.user){
     localStorage.removeItem(TOKEN_KEY);

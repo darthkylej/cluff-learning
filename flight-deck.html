@@ -730,11 +730,11 @@ function mathPanel(d){
   }
   return '<div class="panel mpanel">'+panelHead('math-facts','last played '+relTime(d.math.updated_at))
     +'<div class="stat-row">'
-      +'<div class="stat"><div class="k">Best score</div><div class="v" style="color:var(--violet)">'+Number(st.best||0)+'</div></div>'
+      +'<div class="stat"><div class="k">Most right</div><div class="v" style="color:var(--violet)">'+Number(st.best||0)+'</div></div>'
       +'<div class="stat"><div class="k">Runs</div><div class="v">'+Number(st.runs||0)+'</div></div>'
       +'<div class="stat"><div class="k">Furthest</div><div class="v">'+Number(st.furthest||0)+'</div></div>'
     +'</div>'+note
-    +'<div class="note">A run ends when the monster catches up, so the score is how long they held it off.</div>'
+    +'<div class="note">Most right is the most facts answered correctly in one run. A run ends when the monster has caught them three times.</div>'
     +'</div>';
 }
 
